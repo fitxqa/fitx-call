@@ -1,0 +1,67 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install
+        run: npm ci
+
+      - name: google-services.json (from secret, optional)
+        env:
+          GS: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GS" ]; then printf '%s' "$GS" > android/app/google-services.json; fi
+          if [ -f android/app/google-services.json ]; then echo "google-services.json found ✔"; else
+            echo "::warning::android/app/google-services.json is missing — calls will NOT ring when the app is closed."; fi
+          if grep -q PASTE_API_KEY www/firebase-config.js; then
+            echo "::warning::www/firebase-config.js still has placeholders — the app will show 'Setup needed'."; fi
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      - name: Build signed APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Rename
+        run: cp android/app/build/outputs/apk/release/app-release.apk FitX-Call.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FitX-Call-apk
+          path: FitX-Call.apk
+
+      - name: Publish release (download link for phones)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: FitX Call 1.0.${{ github.run_number }}
+          body: Download **FitX-Call.apk** on the phone and install it. Newer versions install over older ones.
+          files: FitX-Call.apk
+          make_latest: true

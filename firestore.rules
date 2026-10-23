@@ -1,0 +1,37 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function myDoc() { return /databases/$(database)/documents/users/$(request.auth.uid); }
+    function active() { return signedIn() && exists(myDoc()) && get(myDoc()).data.disabled != true; }
+
+    // Employee directory. Accounts are created/changed only by admin Cloud Functions.
+    match /users/{uid} {
+      allow read: if active();
+      allow update: if active() && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['fcmToken', 'lastSeen', 'platform', 'appVersion']);
+    }
+
+    // Calls: only the two people in a call can see or change it.
+    match /calls/{callId} {
+      function party(d) { return d.from == request.auth.uid || d.to == request.auth.uid; }
+
+      allow create: if active()
+        && request.resource.data.from == request.auth.uid
+        && request.resource.data.status == 'ringing'
+        && exists(/databases/$(database)/documents/users/$(request.resource.data.to));
+      allow read: if active() && party(resource.data);
+      allow update: if active() && party(resource.data)
+        && request.resource.data.from == resource.data.from
+        && request.resource.data.to == resource.data.to;
+
+      match /{side}/{candId} {
+        allow read, create: if active()
+          && (side == 'callerCandidates' || side == 'calleeCandidates')
+          && party(get(/databases/$(database)/documents/calls/$(callId)).data);
+      }
+    }
+  }
+}

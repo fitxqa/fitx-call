@@ -1,0 +1,39 @@
+name: Deploy backend (Firebase)
+
+# Run manually: GitHub → Actions → "Deploy backend (Firebase)" → Run workflow
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Firebase credentials
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$SA" ]; then echo "::error::Add the FIREBASE_SERVICE_ACCOUNT secret first (see README)"; exit 1; fi
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+          echo "PROJECT_ID=$(jq -r .project_id "$RUNNER_TEMP/sa.json")" >> "$GITHUB_ENV"
+
+      - name: Install function packages
+        working-directory: functions
+        run: npm install --omit=dev --no-audit --no-fund
+
+      - name: Deploy security rules, indexes and functions
+        run: npx -y firebase-tools@latest deploy --only firestore,functions --project "$PROJECT_ID" --non-interactive --force
+
+      - name: Create first admin account
+        working-directory: functions
+        env:
+          ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          ADMIN_NAME: ${{ secrets.ADMIN_NAME }}
+        run: node create-admin.js
