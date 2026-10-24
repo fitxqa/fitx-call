@@ -150,7 +150,7 @@ async function checkSetup() {
     const c = String(e.code || e.message || '');
     $('setup-btn').classList.remove('hidden');
     $('login-err').textContent = c.includes('permission')
-      ? 'Setup needed: publish the security rules in Firebase (Firestore → Rules)'
+      ? 'Tap "First-time setup" below to create the admin account'
       : c === 'db-timeout' || c.includes('unavailable') || c.includes('not-found') || c.includes('NOT_FOUND')
         ? 'Setup needed: create the Firestore database in Firebase'
         : 'Database error: ' + c;
@@ -205,8 +205,8 @@ async function onLogin(user) {
     show('s-login');
     const rc = readErr ? String(readErr.code || readErr.message || '') : '';
     $('login-err').textContent = readErr
-      ? (rc === 'db-timeout' || rc.includes('unavailable') ? 'Password OK, but the database is not reachable — run the Cloud Shell setup (database step)'
-        : rc.includes('permission') ? 'Password OK, but security rules are not published — run the Cloud Shell setup'
+      ? (rc === 'db-timeout' || rc.includes('unavailable') ? 'Password OK, but the database is not reachable — check the Firestore (default) database exists'
+        : rc.includes('permission') ? 'Password OK, but this account has no profile yet. Tap "First-time setup" below and enter the same username and password.'
           : 'Password OK, database error: ' + rc)
       : snap && snap.exists() ? 'This account is disabled — contact admin' : 'Account not set up — contact admin';
     return;
