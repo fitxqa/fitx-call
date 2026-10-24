@@ -24,12 +24,13 @@ jobs:
         run: |
           if [ -n "$ALL" ]; then
             J=$(printf '%s' "$ALL" | tr -d ' \n\r' | base64 -d)
-            SA=$(printf '%s' "$J" | jq -c .serviceAccount)
-            AU=$(printf '%s' "$J" | jq -r '.adminUsername // empty')
-            AP=$(printf '%s' "$J" | jq -r '.adminPassword // empty'); echo "::add-mask::$AP"
-            AN=$(printf '%s' "$J" | jq -r '.adminName // empty')
+            v=$(printf '%s' "$J" | jq -c '.serviceAccount // empty'); [ -n "$v" ] && SA="$v"
+            v=$(printf '%s' "$J" | jq -r '.adminUsername // empty'); [ -n "$v" ] && AU="$v"
+            v=$(printf '%s' "$J" | jq -r '.adminPassword // empty'); [ -n "$v" ] && AP="$v"
+            v=$(printf '%s' "$J" | jq -r '.adminName // empty'); [ -n "$v" ] && AN="$v"
+            echo "::add-mask::$AP"
           fi
-          if [ -z "$SA" ] || [ "$SA" = "null" ]; then echo "::error::Add the FITX_ALL secret first"; exit 1; fi
+          if [ -z "$SA" ] || [ "$SA" = "null" ]; then echo "::error::Add the FIREBASE_SERVICE_ACCOUNT secret (Firebase key .json) first"; exit 1; fi
           printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
           { echo "ADMIN_USERNAME=$AU"; echo "ADMIN_PASSWORD=$AP"; echo "ADMIN_NAME=$AN"; } >> "$GITHUB_ENV"
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
