@@ -68,6 +68,19 @@ if (configured) {
 }
 const DOMAIN = CFG.loginDomain || 'fitxcall.local';
 const withTimeout = (p, ms, code) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej({ code }), ms))]);
+// Ask Google directly why the database can't be reached (the SDK only says "offline").
+async function diagnoseDb() {
+  try {
+    const url = `https://firestore.googleapis.com/v1/projects/${CFG.firebase.projectId}/databases/(default)/documents/config/setup?key=${CFG.firebase.apiKey}`;
+    const r = await withTimeout(fetch(url), 10000, 'net');
+    let msg = '';
+    try { const j = await r.json(); msg = (j.error && (j.error.message || j.error.status)) || ''; } catch (e) {}
+    if (r.ok) return 'DB OK (200)';
+    if (r.status === 404 && /does not exist/i.test(msg)) return 'The (default) Firestore database does not exist yet';
+    if (r.status === 404) return 'DB reachable (404 = setup not done yet)';
+    return `DB error ${r.status}: ${msg.slice(0, 160)}`;
+  } catch (e) { return 'Phone cannot reach Google servers (internet / VPN / firewall)'; }
+}
 const cleanUser = (u) => String(u || '').trim().toLowerCase();
 
 // A second Firebase instance so the admin can create accounts without being signed out.
@@ -151,9 +164,7 @@ async function checkSetup() {
     $('setup-btn').classList.remove('hidden');
     $('login-err').textContent = c.includes('permission')
       ? 'Tap "First-time setup" below to create the admin account'
-      : c === 'db-timeout' || c.includes('unavailable') || c.includes('not-found') || c.includes('NOT_FOUND')
-        ? 'Setup needed: create the Firestore database in Firebase'
-        : 'Database error: ' + c;
+      : 'Database: ' + (await diagnoseDb());
   }
 }
 $('setup-btn').addEventListener('click', () => { $('setup-form').classList.remove('hidden'); $('setup-btn').classList.add('hidden'); });
@@ -190,7 +201,7 @@ $('setup-form').addEventListener('submit', async (e) => {
       : c.includes('operation-not-allowed') ? 'Switch on Email/Password sign-in in Firebase first'
         : c.includes('wrong') || c.includes('invalid') ? 'That username exists with a different password'
           : c.includes('weak-password') ? 'Password must be at least 6 characters'
-            : c === 'db-timeout' ? 'Database not reachable — create the Firestore database first'
+            : c === 'db-timeout' ? 'Database: ' + (await diagnoseDb())
               : (c.includes('/') ? 'Failed: ' + c.replace('auth/', '') : c);
     if (auth.currentUser) signOut(auth).catch(() => {});
   }
@@ -221,7 +232,7 @@ async function onLogin(user) {
     show('s-login');
     const rc = readErr ? String(readErr.code || readErr.message || '') : '';
     $('login-err').textContent = readErr
-      ? (rc === 'db-timeout' || rc.includes('unavailable') ? 'Password OK, but the database is not reachable — check the Firestore (default) database exists'
+      ? (rc === 'db-timeout' || rc.includes('unavailable') ? 'Password OK, but database problem: ' + (await diagnoseDb())
         : rc.includes('permission') ? 'Password OK, but this account has no profile yet. Tap "First-time setup" below and enter the same username and password.'
           : 'Password OK, database error: ' + rc)
       : snap && snap.exists() ? 'This account is disabled — contact admin' : 'Account not set up — contact admin';
