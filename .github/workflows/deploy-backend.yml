@@ -23,8 +23,10 @@ jobs:
           AN: ${{ secrets.ADMIN_NAME }}
         run: |
           if [ -n "$ALL" ]; then
-            C=$(printf '%s' "$ALL" | tr -d ' \n\r\t')
-            echo "FITX_ALL length: ${#C} characters (expected 5004)"
+            # Accept either the long line alone or the whole pasted file: pick the longest base64 line.
+            C=$(printf '%s\n' "$ALL" | tr -d ' \r\t' | grep -oE '[A-Za-z0-9+/]{1000,}={0,2}' | awk '{ if (length($0) > length(m)) m=$0 } END { print m }')
+            [ -z "$C" ] && C=$(printf '%s' "$ALL" | tr -d ' \n\r\t')
+            echo "FITX_ALL key length: ${#C} characters (expected 5004)"
             if ! J=$(printf '%s' "$C" | base64 -d 2>/dev/null) || ! printf '%s' "$J" | jq -e . >/dev/null 2>&1; then
               echo "::error::FITX_ALL is ${#C} characters but should be 5004 — it was not copied completely. Delete it and paste the whole long line again."; exit 1; fi
             v=$(printf '%s' "$J" | jq -c '.serviceAccount // empty'); [ -n "$v" ] && SA="$v"
