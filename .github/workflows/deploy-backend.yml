@@ -37,6 +37,13 @@ jobs:
           fi
           if [ -z "$SA" ] || [ "$SA" = "null" ]; then echo "::error::Add the FIREBASE_SERVICE_ACCOUNT secret (Firebase key .json) first"; exit 1; fi
           printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          if ! jq -e . "$RUNNER_TEMP/sa.json" >/dev/null 2>&1; then
+            echo "::error::FIREBASE_SERVICE_ACCOUNT is not valid JSON (${#SA} characters). Paste the whole .json file text, from the first { to the last }."; exit 1; fi
+          T=$(jq -r '.type // "missing"' "$RUNNER_TEMP/sa.json"); P=$(jq -r '.project_id // .project_info.project_id // "missing"' "$RUNNER_TEMP/sa.json")
+          K=$(jq -r 'if .private_key then "yes" else "no" end' "$RUNNER_TEMP/sa.json")
+          echo "::notice::Key file check: type=$T project=$P private_key=$K"
+          if [ "$T" != "service_account" ] || [ "$K" != "yes" ]; then
+            echo "::error::FIREBASE_SERVICE_ACCOUNT is the wrong file (type=$T). It must be the key from Firebase → Project settings → Service accounts → Generate new private key."; exit 1; fi
           { echo "ADMIN_USERNAME=$AU"; echo "ADMIN_PASSWORD=$AP"; echo "ADMIN_NAME=$AN"; } >> "$GITHUB_ENV"
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
           echo "PROJECT_ID=$(jq -r .project_id "$RUNNER_TEMP/sa.json")" >> "$GITHUB_ENV"
