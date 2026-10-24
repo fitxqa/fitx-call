@@ -6,7 +6,7 @@ import {
   updatePassword, reauthenticateWithCredential, EmailAuthProvider,
 } from 'firebase/auth';
 import {
-  initializeFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection, query, where, orderBy, limit,
+  initializeFirestore, writeBatch, doc, getDoc, setDoc, updateDoc, deleteDoc, collection, query, where, orderBy, limit,
   onSnapshot, serverTimestamp,
 } from 'firebase/firestore';
 import { Capacitor, registerPlugin } from '@capacitor/core';
@@ -136,6 +136,64 @@ $('change-pass').addEventListener('click', async () => {
     await updatePassword(auth.currentUser, np);
     toast('Password changed');
   } catch (e) { toast(String(e.code || '').includes('invalid') || String(e.code || '').includes('wrong') ? 'Current password is wrong' : 'Could not change password'); }
+});
+
+// ---------- First-time setup (no Cloud Shell needed) ----------
+let settingUp = false;
+async function checkSetup() {
+  if (!configured) return;
+  try {
+    const s = await withTimeout(getDoc(doc(db, 'config', 'setup')), 10000, 'db-timeout');
+    $('setup-btn').classList.toggle('hidden', s.exists());
+  } catch (e) {
+    const c = String(e.code || e.message || '');
+    $('setup-btn').classList.add('hidden');
+    $('login-err').textContent = c.includes('permission')
+      ? 'Setup needed: publish the security rules in Firebase (Firestore → Rules)'
+      : c === 'db-timeout' || c.includes('unavailable') || c.includes('not-found') || c.includes('NOT_FOUND')
+        ? 'Setup needed: create the Firestore database in Firebase'
+        : 'Database error: ' + c;
+  }
+}
+$('setup-btn').addEventListener('click', () => { $('setup-form').classList.remove('hidden'); $('setup-btn').classList.add('hidden'); });
+$('setup-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('su-err'); err.textContent = 'Creating…';
+  const btn = e.target.querySelector('button'); btn.disabled = true;
+  const name = $('su-name').value.trim(), username = cleanUser($('su-user').value), password = $('su-pass').value;
+  settingUp = true;
+  try {
+    if (!/^[a-z0-9._-]{3,30}$/.test(username)) throw { code: 'Username: 3–30 lowercase letters/numbers' };
+    const email = `${username}@${DOMAIN}`;
+    let cred;
+    try { cred = await createUserWithEmailAndPassword(auth, email, password); }
+    catch (x) {
+      if (!String(x.code).includes('email-already-in-use')) throw x;
+      cred = await signInWithEmailAndPassword(auth, email, password); // created earlier, finish setup
+    }
+    const uid = cred.user.uid;
+    const b = writeBatch(db);
+    b.set(doc(db, 'users', uid), { name, username, department: 'Management', role: 'admin', disabled: false, createdAt: serverTimestamp() });
+    b.set(doc(db, 'usernames', username), { email, uid });
+    b.set(doc(db, 'config', 'setup'), { done: true, by: uid, at: serverTimestamp() });
+    await withTimeout(b.commit(), 15000, 'db-timeout');
+    settingUp = false;
+    err.textContent = '';
+    $('setup-form').classList.add('hidden');
+    toast('Admin created — welcome!', 3000);
+    onLogin(cred.user);
+  } catch (x) {
+    settingUp = false;
+    const c = String(x.code || x.message || '');
+    err.textContent = c.includes('permission') ? 'Not allowed: setup was already done, or the security rules are not published'
+      : c.includes('operation-not-allowed') ? 'Switch on Email/Password sign-in in Firebase first'
+        : c.includes('wrong') || c.includes('invalid') ? 'That username exists with a different password'
+          : c.includes('weak-password') ? 'Password must be at least 6 characters'
+            : c === 'db-timeout' ? 'Database not reachable — create the Firestore database first'
+              : (c.includes('/') ? 'Failed: ' + c.replace('auth/', '') : c);
+    if (auth.currentUser) signOut(auth).catch(() => {});
+  }
+  btn.disabled = false;
 });
 
 async function onLogin(user) {
@@ -576,4 +634,4 @@ window.addEventListener('offline', () => toast('No internet connection'));
 
 // ---------- Boot ----------
 if (!configured) show('s-setup');
-else onAuthStateChanged(auth, (u) => (u ? onLogin(u) : onLogout()));
+else onAuthStateChanged(auth, (u) => { if (settingUp) return; if (u) onLogin(u); else { onLogout(); checkSetup(); } });

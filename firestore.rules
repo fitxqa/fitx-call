@@ -8,17 +8,27 @@ service cloud.firestore {
     function isAdmin() { return active() && get(myPath()).data.role == 'admin'; }
     function callOf(id) { return get(/databases/$(database)/documents/calls/$(id)).data; }
     function party(d) { return d.from == request.auth.uid || d.to == request.auth.uid; }
+    function setupPath() { return /databases/$(database)/documents/config/setup; }
+    // First-time setup: the very first signed-in person may make themselves admin, once.
+    function bootstrapping() { return signedIn() && !exists(setupPath()) && existsAfter(setupPath()); }
+
+    match /config/setup {
+      allow read: if true;
+      allow create: if bootstrapping()
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
 
     // Username -> hidden login email. Read before sign-in; only admins change it.
     match /usernames/{name} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if isAdmin() || bootstrapping();
     }
 
     // Employee directory. Admins manage it; employees may only update their own presence fields.
     match /users/{uid} {
       allow read: if active();
-      allow create, delete: if isAdmin();
+      allow create: if isAdmin() || (bootstrapping() && request.auth.uid == uid && request.resource.data.role == 'admin');
+      allow delete: if isAdmin();
       allow update: if isAdmin()
         || (active() && request.auth.uid == uid
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastSeen', 'platform', 'appVersion']));

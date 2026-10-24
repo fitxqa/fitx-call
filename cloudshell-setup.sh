@@ -91,6 +91,7 @@ r = call("PATCH", f"{FS}/users/{uid}", {"fields": {"name": s(AN), "username": s(
 if "error" in r: raise SystemExit("✗ Could not save admin profile: " + json.dumps(r["error"]))
 r = call("PATCH", f"{FS}/usernames/{AU}", {"fields": {"email": s(email), "uid": s(uid)}})
 if "error" in r: raise SystemExit("✗ Could not save username: " + json.dumps(r["error"]))
+r = call("PATCH", f"{FS}/config/setup", {"fields": {"done": {"booleanValue": True}, "by": s(uid)}})
 print("✔ Admin profile saved")
 PY
 

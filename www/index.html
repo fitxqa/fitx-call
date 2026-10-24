@@ -44,6 +44,16 @@
       <button class="btn primary" type="submit">Sign in</button>
       <p id="login-err" class="err"></p>
     </form>
+    <button id="setup-btn" class="btn ghost hidden" style="margin-top:14px">First-time setup — create admin</button>
+    <form id="setup-form" class="card form hidden" style="margin-top:14px">
+      <h3>Create the admin account</h3>
+      <p class="muted">Only works once, for the first person. Use your own name.</p>
+      <label>Your name<input id="su-name" required></label>
+      <label>Admin username<input id="su-user" autocapitalize="none" value="admin" required></label>
+      <label>Password (6+ characters)<input id="su-pass" type="password" minlength="6" required></label>
+      <button class="btn primary" type="submit">Create admin &amp; sign in</button>
+      <p id="su-err" class="err"></p>
+    </form>
   </section>
 
   <!-- Main -->
