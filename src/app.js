@@ -142,12 +142,13 @@ $('change-pass').addEventListener('click', async () => {
 let settingUp = false;
 async function checkSetup() {
   if (!configured) return;
+  $('setup-btn').classList.remove('hidden');
   try {
     const s = await withTimeout(getDoc(doc(db, 'config', 'setup')), 10000, 'db-timeout');
     $('setup-btn').classList.toggle('hidden', s.exists());
   } catch (e) {
     const c = String(e.code || e.message || '');
-    $('setup-btn').classList.add('hidden');
+    $('setup-btn').classList.remove('hidden');
     $('login-err').textContent = c.includes('permission')
       ? 'Setup needed: publish the security rules in Firebase (Firestore → Rules)'
       : c === 'db-timeout' || c.includes('unavailable') || c.includes('not-found') || c.includes('NOT_FOUND')
