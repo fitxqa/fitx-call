@@ -200,6 +200,22 @@ $('setup-form').addEventListener('submit', async (e) => {
 async function onLogin(user) {
   let snap = null, readErr = null;
   try { snap = await withTimeout(getDoc(doc(db, 'users', user.uid)), 12000, 'db-timeout'); } catch (e) { readErr = e; }
+  // Password correct but no profile yet, and first-time setup never finished → finish it now (rules allow this once).
+  if (readErr && String(readErr.code || '').includes('permission')) {
+    try {
+      const st = await withTimeout(getDoc(doc(db, 'config', 'setup')), 10000, 'db-timeout');
+      if (!st.exists()) {
+        const username = String(user.email || '').split('@')[0].split('.')[0];
+        const b = writeBatch(db);
+        b.set(doc(db, 'users', user.uid), { name: username === 'admin' ? 'FitX Admin' : username, username, department: 'Management', role: 'admin', disabled: false, createdAt: serverTimestamp() });
+        b.set(doc(db, 'usernames', username), { email: user.email, uid: user.uid });
+        b.set(doc(db, 'config', 'setup'), { done: true, by: user.uid, at: serverTimestamp() });
+        await withTimeout(b.commit(), 15000, 'db-timeout');
+        toast('Admin account set up — welcome!', 3000);
+        snap = await getDoc(doc(db, 'users', user.uid)); readErr = null;
+      }
+    } catch (e) { readErr = e; }
+  }
   if (!snap || !snap.exists() || snap.data().disabled) {
     await signOut(auth);
     show('s-login');
