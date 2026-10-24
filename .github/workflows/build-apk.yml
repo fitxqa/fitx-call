@@ -44,7 +44,10 @@ jobs:
           KP: ${{ secrets.FITX_KEYSTORE_PASSWORD }}
         run: |
           if [ -n "$ALL" ]; then
-            J=$(printf '%s' "$ALL" | tr -d ' \n\r' | base64 -d)
+            C=$(printf '%s' "$ALL" | tr -d ' \n\r\t')
+            echo "FITX_ALL length: ${#C} characters (expected 5004)"
+            if ! J=$(printf '%s' "$C" | base64 -d 2>/dev/null) || ! printf '%s' "$J" | jq -e . >/dev/null 2>&1; then
+              echo "::error::FITX_ALL is ${#C} characters but should be 5004 — it was not copied completely. Delete it and paste the whole long line again."; exit 1; fi
             KS=$(printf '%s' "$J" | jq -r .keystoreB64); KP=$(printf '%s' "$J" | jq -r .keystorePassword)
             echo "::add-mask::$KP"
           fi
