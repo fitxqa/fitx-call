@@ -1,18 +1,26 @@
 package qa.fitx.call;
 
+import android.app.NotificationManager;
 import android.content.Context;
+import android.content.Intent;
 import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.PowerManager;
+import android.provider.Settings;
 import android.view.WindowManager;
+import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import java.util.List;
 
-/** Speaker / earpiece switching, keep-screen-on, and screen-off near the ear during voice calls. */
+/**
+ * Native helpers: speaker/earpiece, screen-off at ear, background "ready for calls"
+ * service, native ringing notifications, and battery / full-screen permission checks.
+ */
 @CapacitorPlugin(name = "AudioRoute")
 public class AudioRoutePlugin extends Plugin {
 
@@ -22,6 +30,7 @@ public class AudioRoutePlugin extends Plugin {
         return (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
     }
 
+    // ---------- call audio ----------
     @PluginMethod
     public void startCall(PluginCall call) {
         boolean video = call.getBoolean("video", false);
@@ -37,6 +46,7 @@ public class AudioRoutePlugin extends Plugin {
                 }
             } catch (Exception ignored) {}
         }
+        if (CallService.running) CallService.start(getContext(), true);
         call.resolve();
     }
 
@@ -52,7 +62,6 @@ public class AudioRoutePlugin extends Plugin {
                 AudioDeviceInfo pick = null;
                 for (AudioDeviceInfo dev : devices) {
                     int t = dev.getType();
-                    // Prefer a connected headset / Bluetooth when going to "earpiece"
                     if (!on && (t == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || t == AudioDeviceInfo.TYPE_WIRED_HEADSET
                         || t == AudioDeviceInfo.TYPE_USB_HEADSET || t == AudioDeviceInfo.TYPE_BLE_HEADSET)) { pick = dev; break; }
                     if (t == want && pick == null) pick = dev;
@@ -62,7 +71,6 @@ public class AudioRoutePlugin extends Plugin {
                 am.setSpeakerphoneOn(on);
             }
         }
-        // Screen-off-at-ear only makes sense on earpiece
         if (on && proximity != null && proximity.isHeld()) proximity.release();
         call.resolve();
     }
@@ -79,6 +87,123 @@ public class AudioRoutePlugin extends Plugin {
         proximity = null;
         getActivity().runOnUiThread(() -> getActivity().getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON));
         CallNotifications.cancelIncoming(getContext());
+        if (CallService.running) CallService.start(getContext(), false);
         call.resolve();
+    }
+
+    // ---------- background service ----------
+    @PluginMethod
+    public void startService(PluginCall call) {
+        CallNotifications.cancelClosed(getContext());
+        CallService.start(getContext(), false);
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void stopService(PluginCall call) {
+        CallService.stop(getContext());
+        call.resolve();
+    }
+
+    // ---------- ringing ----------
+    @PluginMethod
+    public void ringIncoming(PluginCall call) {
+        String id = call.getString("callId", "");
+        String from = call.getString("fromName", "FitX");
+        String type = call.getString("callType", "audio");
+        boolean shown = false;
+        if (!MainActivity.inForeground) {
+            CallNotifications.showIncoming(getContext(), id, from, type);
+            shown = true;
+        }
+        JSObject r = new JSObject();
+        r.put("shown", shown);
+        call.resolve(r);
+    }
+
+    @PluginMethod
+    public void cancelIncoming(PluginCall call) {
+        CallNotifications.cancelIncoming(getContext());
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void showMissed(PluginCall call) {
+        if (!MainActivity.inForeground) {
+            CallNotifications.showMissed(getContext(), call.getString("callId", "x"), call.getString("fromName", "FitX"), call.getString("callType", "audio"));
+        }
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void isForeground(PluginCall call) {
+        JSObject r = new JSObject();
+        r.put("value", MainActivity.inForeground);
+        call.resolve(r);
+    }
+
+    // ---------- reliability checks ----------
+    @PluginMethod
+    public void checkReliability(PluginCall call) {
+        JSObject r = new JSObject();
+        PowerManager pm = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
+        r.put("battery", pm == null || pm.isIgnoringBatteryOptimizations(getContext().getPackageName()));
+        boolean fsi = true;
+        if (Build.VERSION.SDK_INT >= 34) {
+            NotificationManager nm = getContext().getSystemService(NotificationManager.class);
+            fsi = nm == null || nm.canUseFullScreenIntent();
+        }
+        r.put("fullScreen", fsi);
+        boolean notif = true;
+        if (Build.VERSION.SDK_INT >= 24) {
+            NotificationManager nm = (NotificationManager) getContext().getSystemService(Context.NOTIFICATION_SERVICE);
+            notif = nm == null || nm.areNotificationsEnabled();
+        }
+        r.put("notifications", notif);
+        r.put("service", CallService.running);
+        call.resolve(r);
+    }
+
+    @PluginMethod
+    public void openBatterySettings(PluginCall call) {
+        try {
+            Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getContext().getPackageName()));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(i);
+        } catch (Exception e) {
+            openAppSettings();
+        }
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void openFullScreenSettings(PluginCall call) {
+        try {
+            if (Build.VERSION.SDK_INT >= 34) {
+                Intent i = new Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:" + getContext().getPackageName()));
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(i);
+            } else openAppSettings();
+        } catch (Exception e) { openAppSettings(); }
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void openNotificationSettings(PluginCall call) {
+        try {
+            Intent i = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, getContext().getPackageName())
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(i);
+        } catch (Exception e) { openAppSettings(); }
+        call.resolve();
+    }
+
+    private void openAppSettings() {
+        try {
+            Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getContext().getPackageName()));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(i);
+        } catch (Exception ignored) {}
     }
 }

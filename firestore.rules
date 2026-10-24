@@ -3,21 +3,36 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     function signedIn() { return request.auth != null; }
-    function myDoc() { return /databases/$(database)/documents/users/$(request.auth.uid); }
-    function active() { return signedIn() && exists(myDoc()) && get(myDoc()).data.disabled != true; }
+    function myPath() { return /databases/$(database)/documents/users/$(request.auth.uid); }
+    function active() { return signedIn() && exists(myPath()) && get(myPath()).data.disabled != true; }
+    function isAdmin() { return active() && get(myPath()).data.role == 'admin'; }
+    function callOf(id) { return get(/databases/$(database)/documents/calls/$(id)).data; }
+    function party(d) { return d.from == request.auth.uid || d.to == request.auth.uid; }
 
-    // Employee directory. Accounts are created/changed only by admin Cloud Functions.
+    // Username -> hidden login email. Read before sign-in; only admins change it.
+    match /usernames/{name} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Employee directory. Admins manage it; employees may only update their own presence fields.
     match /users/{uid} {
       allow read: if active();
-      allow update: if active() && request.auth.uid == uid
-        && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['fcmToken', 'lastSeen', 'platform', 'appVersion']);
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin()
+        || (active() && request.auth.uid == uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastSeen', 'platform', 'appVersion']));
+
+      // Personal call history ("Recents").
+      match /log/{callId} {
+        allow read, delete: if active() && request.auth.uid == uid;
+        allow create, update: if active()
+          && (request.auth.uid == uid || (party(callOf(callId)) && (callOf(callId).from == uid || callOf(callId).to == uid)));
+      }
     }
 
     // Calls: only the two people in a call can see or change it.
     match /calls/{callId} {
-      function party(d) { return d.from == request.auth.uid || d.to == request.auth.uid; }
-
       allow create: if active()
         && request.resource.data.from == request.auth.uid
         && request.resource.data.status == 'ringing'
@@ -30,7 +45,7 @@ service cloud.firestore {
       match /{side}/{candId} {
         allow read, create: if active()
           && (side == 'callerCandidates' || side == 'calleeCandidates')
-          && party(get(/databases/$(database)/documents/calls/$(callId)).data);
+          && party(callOf(callId));
       }
     }
   }

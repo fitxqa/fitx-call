@@ -1,24 +1,23 @@
-// FitX Call — app shell: login, team list, recents, admin, ringing
+// FitX Call — app shell (free Firebase "Spark" plan: no Cloud Functions, no server push)
 import { initializeApp } from 'firebase/app';
 import {
-  initializeAuth, indexedDBLocalPersistence, browserLocalPersistence,
-  signInWithEmailAndPassword, onAuthStateChanged, signOut,
+  initializeAuth, getAuth, indexedDBLocalPersistence, browserLocalPersistence, inMemoryPersistence,
+  signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut,
+  updatePassword, reauthenticateWithCredential, EmailAuthProvider,
 } from 'firebase/auth';
 import {
-  getFirestore, doc, getDoc, updateDoc, collection, query, where, orderBy, limit,
+  getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection, query, where, orderBy, limit,
   onSnapshot, serverTimestamp,
 } from 'firebase/firestore';
-import { getFunctions, httpsCallable } from 'firebase/functions';
 import { Capacitor, registerPlugin } from '@capacitor/core';
-import { PushNotifications } from '@capacitor/push-notifications';
 import { App } from '@capacitor/app';
 import { CallSession } from './call.js';
 
 const CFG = window.FITX_CONFIG || {};
 const $ = (id) => document.getElementById(id);
 const native = Capacitor.isNativePlatform();
-const AudioRoute = registerPlugin('AudioRoute');
-const VERSION = '1.0';
+const Native = registerPlugin('AudioRoute');
+const VERSION = '1.1';
 
 // ---------- UI helpers ----------
 const screens = ['s-loading', 's-setup', 's-login', 's-main', 's-incoming', 's-call'];
@@ -42,122 +41,168 @@ function ago(t) {
 }
 const fmtDur = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 const saverOn = () => { try { return localStorage.getItem('saver') === '1'; } catch (e) { return false; } };
+$('ver').textContent = `FitX Call v${VERSION}`;
 
-// ---------- Tones (no audio files = lighter app) ----------
+// ---------- Tones (generated, no audio files) ----------
 const Tone = {
-  ctx: null, timer: null, nodes: [],
+  ctx: null, timer: null,
   _beep(freqs, dur, vol = 0.18) {
     const ctx = this.ctx || (this.ctx = new (window.AudioContext || window.webkitAudioContext)());
     if (ctx.state === 'suspended') ctx.resume();
     const g = ctx.createGain(); g.gain.value = vol; g.connect(ctx.destination);
-    freqs.forEach((f) => {
-      const o = ctx.createOscillator(); o.frequency.value = f; o.connect(g);
-      o.start(); o.stop(ctx.currentTime + dur);
-    });
+    freqs.forEach((f) => { const o = ctx.createOscillator(); o.frequency.value = f; o.connect(g); o.start(); o.stop(ctx.currentTime + dur); });
   },
   ring() { this.stop(); const play = () => { this._beep([880, 1100], 0.35, 0.22); setTimeout(() => this._beep([880, 1100], 0.35, 0.22), 450); if (navigator.vibrate) navigator.vibrate([400, 200, 400]); }; play(); this.timer = setInterval(play, 2200); },
-  ringback() { this.stop(); const play = () => { this._beep([425], 1.0, 0.08); }; play(); this.timer = setInterval(play, 4000); },
+  ringback() { this.stop(); const play = () => this._beep([425], 1.0, 0.08); play(); this.timer = setInterval(play, 4000); },
   stop() { clearInterval(this.timer); this.timer = null; if (navigator.vibrate) navigator.vibrate(0); },
 };
 
 // ---------- Firebase ----------
 const configured = CFG.firebase && CFG.firebase.apiKey && !String(CFG.firebase.apiKey).startsWith('PASTE');
-let fb, auth, db, fns;
+let fb, auth, db;
 if (configured) {
   fb = initializeApp(CFG.firebase);
   auth = initializeAuth(fb, { persistence: [indexedDBLocalPersistence, browserLocalPersistence] });
   db = getFirestore(fb);
-  fns = getFunctions(fb, CFG.functionsRegion || 'europe-west1');
 }
 const DOMAIN = CFG.loginDomain || 'fitxcall.local';
-const toEmail = (u) => `${String(u).trim().toLowerCase()}@${DOMAIN}`;
+const cleanUser = (u) => String(u || '').trim().toLowerCase();
+
+// A second Firebase instance so the admin can create accounts without being signed out.
+let creatorAuth = null;
+function creator() {
+  if (!creatorAuth) creatorAuth = initializeAuth(initializeApp(CFG.firebase, 'creator'), { persistence: inMemoryPersistence });
+  return creatorAuth;
+}
 
 // ---------- State ----------
-let me = null;            // { uid, name, username, role, department }
-let users = [];           // team list
-let current = null;       // CallSession
-let incoming = null;      // { id, data }
-let pendingLink = null;   // { id, action } from notification tap
+let me = null;
+let users = [];
+let current = null;
+let incoming = null;
+let pendingLink = null;
 let unsubs = [];
 let heartbeat = null;
 let callTimer = null;
+let inBackground = false;
 
 // ---------- Auth ----------
+async function emailFor(username) {
+  try {
+    const m = await getDoc(doc(db, 'usernames', username));
+    if (m.exists() && m.data().email) return m.data().email;
+  } catch (e) { /* rules not published yet → fall back */ }
+  return `${username}@${DOMAIN}`;
+}
+
 $('login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   $('login-err').textContent = '';
   const btn = e.target.querySelector('button'); btn.disabled = true; btn.textContent = 'Signing in…';
   try {
-    await signInWithEmailAndPassword(auth, toEmail($('login-user').value), $('login-pass').value);
+    const u = cleanUser($('login-user').value);
+    await signInWithEmailAndPassword(auth, await emailFor(u), $('login-pass').value);
   } catch (err) {
-    const c = err.code || '';
-    $('login-err').textContent = c.includes('invalid') || c.includes('wrong') || c.includes('not-found')
+    const c = err.code || String(err.message || '');
+    $('login-err').textContent = (c.includes('invalid') || c.includes('wrong') || c.includes('not-found')
       ? 'Wrong username or password' : c.includes('disabled') ? 'This account is disabled — contact admin'
-        : c.includes('network') ? 'No internet connection' : 'Sign-in failed. Try again.';
+        : c.includes('network') ? 'No internet connection'
+          : c.includes('operation-not-allowed') ? 'Sign-in is not switched on in Firebase yet (Email/Password)'
+            : 'Sign-in failed') + (c ? ` (${c.replace('auth/', '')})` : '');
   }
   btn.disabled = false; btn.textContent = 'Sign in';
 });
 
 $('logout').addEventListener('click', async () => {
   if (!confirm('Sign out? You will not receive calls on this phone.')) return;
-  try { await updateDoc(doc(db, 'users', me.uid), { fcmToken: null }); } catch (e) {}
+  if (native) Native.stopService().catch(() => {});
   await signOut(auth);
 });
 
+$('change-pass').addEventListener('click', async () => {
+  const cur = prompt('Current password:'); if (!cur) return;
+  const np = prompt('New password (6+ characters):'); if (!np) return;
+  if (np.length < 6) return toast('Password must be at least 6 characters');
+  try {
+    await reauthenticateWithCredential(auth.currentUser, EmailAuthProvider.credential(auth.currentUser.email, cur));
+    await updatePassword(auth.currentUser, np);
+    toast('Password changed');
+  } catch (e) { toast(String(e.code || '').includes('invalid') || String(e.code || '').includes('wrong') ? 'Current password is wrong' : 'Could not change password'); }
+});
+
 async function onLogin(user) {
-  const snap = await getDoc(doc(db, 'users', user.uid)).catch(() => null);
+  let snap = null, readErr = null;
+  try { snap = await getDoc(doc(db, 'users', user.uid)); } catch (e) { readErr = e; }
   if (!snap || !snap.exists() || snap.data().disabled) {
     await signOut(auth);
     show('s-login');
-    $('login-err').textContent = snap && snap.exists() ? 'This account is disabled — contact admin' : 'Account not set up — contact admin';
+    $('login-err').textContent = readErr
+      ? 'Database not set up yet — run the setup step (security rules)'
+      : snap && snap.exists() ? 'This account is disabled — contact admin' : 'Account not set up — contact admin';
     return;
   }
   me = { uid: user.uid, ...snap.data() };
-  $('me-chip').textContent = me.name;
-  $('set-name').textContent = me.name;
-  $('set-user').textContent = `@${me.username}${me.department ? ' · ' + me.department : ''}${me.role === 'admin' ? ' · Admin' : ''}`;
-  $('nav-admin').classList.toggle('hidden', me.role !== 'admin');
+  renderMe();
   show('s-main');
+  // Signed out by admin (disabled / deleted / password reset)?
+  unsubs.push(onSnapshot(doc(db, 'users', user.uid), (s) => {
+    if (!s.exists() || s.data().disabled) { toast('Your account was changed by the admin — sign in again', 4000); signOut(auth); return; }
+    me = { uid: user.uid, ...s.data() }; renderMe();
+  }, () => {}));
   watchTeam();
   watchIncoming();
   watchRecents();
   if (me.role === 'admin') watchAdmin();
   ping();
   heartbeat = setInterval(ping, 60000);
-  setupPush();
+  if (native) { Native.startService().catch(() => {}); refreshChecks(); }
+  else $('checks').innerHTML = '<li class="muted">Background ringing works in the Android app</li>';
+}
+
+function renderMe() {
+  $('me-chip').textContent = me.name;
+  $('set-name').textContent = me.name;
+  $('set-user').textContent = `@${me.username}${me.department ? ' · ' + me.department : ''}${me.role === 'admin' ? ' · Admin' : ''}`;
+  $('nav-admin').classList.toggle('hidden', me.role !== 'admin');
 }
 
 function onLogout() {
   unsubs.forEach((u) => u()); unsubs = [];
   clearInterval(heartbeat);
   me = null; users = [];
+  if (current) current.finish('');
   show('s-login');
 }
 
 function ping() {
-  if (!me || document.hidden) return;
+  if (!me) return;
   updateDoc(doc(db, 'users', me.uid), { lastSeen: serverTimestamp(), appVersion: VERSION, platform: Capacitor.getPlatform() }).catch(() => {});
 }
-document.addEventListener('visibilitychange', ping);
 
-// ---------- Push (ring when app closed) ----------
-async function setupPush() {
-  if (!native) { $('push-state').textContent = 'Only in the Android app'; return; }
+// ---------- Reliability checklist (Settings) ----------
+async function refreshChecks() {
+  if (!native || !me) return;
   try {
-    let p = await PushNotifications.checkPermissions();
-    if (p.receive !== 'granted') p = await PushNotifications.requestPermissions();
-    if (p.receive !== 'granted') { $('push-state').textContent = 'Notifications blocked — allow them in phone Settings'; return; }
-    await PushNotifications.removeAllListeners();
-    PushNotifications.addListener('registration', (t) => {
-      updateDoc(doc(db, 'users', me.uid), { fcmToken: t.value }).catch(() => {});
-      $('push-state').textContent = 'Ready — calls ring even when the app is closed';
-    });
-    PushNotifications.addListener('registrationError', () => { $('push-state').textContent = 'Push setup failed (check google-services.json)'; });
-    await PushNotifications.register();
-  } catch (e) {
-    $('push-state').textContent = 'Push not available in this build';
-  }
+    const r = await Native.checkReliability();
+    const row = (ok, label, fix, act) => `<li><span><span class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✗'}</span> ${label}</span>${ok ? '' : `<button class="btn small" data-fix="${act}">${fix}</button>`}</li>`;
+    $('checks').innerHTML = [
+      row(r.notifications, 'Notifications allowed', 'Allow', 'notif'),
+      row(r.battery, 'Battery: unrestricted', 'Fix', 'battery'),
+      row(r.fullScreen, 'Show calls on lock screen', 'Allow', 'fullscreen'),
+      row(r.service, 'Ready for calls in background', 'Start', 'service'),
+    ].join('');
+    const bad = [r.notifications, r.battery, r.fullScreen].filter((x) => !x).length;
+    if (bad && !sessionStorage.getItem('warned')) { sessionStorage.setItem('warned', '1'); toast('Settings → fix the ✗ items so calls can ring', 4000); }
+  } catch (e) { $('checks').innerHTML = '<li class="muted">Could not check this phone</li>'; }
 }
+$('checks').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-fix]'); if (!b) return;
+  const a = b.dataset.fix;
+  if (a === 'notif') Native.openNotificationSettings();
+  if (a === 'battery') Native.openBatterySettings();
+  if (a === 'fullscreen') Native.openFullScreenSettings();
+  if (a === 'service') Native.startService().then(() => setTimeout(refreshChecks, 800));
+});
 
 // ---------- Team ----------
 function watchTeam() {
@@ -166,7 +211,7 @@ function watchTeam() {
       .filter((u) => u.uid !== me.uid && !u.disabled)
       .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     renderTeam();
-  }));
+  }, () => {}));
 }
 const isOnline = (u) => Date.now() - ms(u.lastSeen) < 150000;
 function renderTeam() {
@@ -190,44 +235,72 @@ document.addEventListener('click', (e) => {
   if (u) startCall(u, b.dataset.type);
 });
 
-// ---------- Recents ----------
-let recFrom = [], recTo = [];
+// ---------- Recents (users/{me}/log, newest first — no paid indexes needed) ----------
 const recentPeers = {};
 function watchRecents() {
-  const base = collection(db, 'calls');
-  unsubs.push(onSnapshot(query(base, where('from', '==', me.uid), orderBy('createdAt', 'desc'), limit(40)),
-    (s) => { recFrom = s.docs.map((d) => ({ id: d.id, ...d.data() })); renderRecents(); }, () => {}));
-  unsubs.push(onSnapshot(query(base, where('to', '==', me.uid), orderBy('createdAt', 'desc'), limit(40)),
-    (s) => { recTo = s.docs.map((d) => ({ id: d.id, ...d.data() })); renderRecents(); }, () => {}));
+  const q = query(collection(db, 'users', me.uid, 'log'), orderBy('createdAtMs', 'desc'), limit(50));
+  unsubs.push(onSnapshot(q, (s) => renderRecents(s.docs.map((d) => ({ id: d.id, ...d.data() }))), () => {}));
 }
-function renderRecents() {
-  const all = [...recFrom, ...recTo].sort((a, b) => (ms(b.createdAt) || b.createdAtMs) - (ms(a.createdAt) || a.createdAtMs)).slice(0, 50);
+function renderRecents(all) {
   $('recents').innerHTML = all.length ? all.map((c) => {
-    const out = c.from === me.uid;
-    const peer = out ? { uid: c.to, name: c.toName } : { uid: c.from, name: c.fromName };
-    recentPeers[peer.uid] = peer;
-    const missed = !out && ['missed', 'cancelled'].includes(c.status);
-    const dur = c.answeredAt && c.endedAt ? fmtDur(Math.max(0, Math.round((ms(c.endedAt) - ms(c.answeredAt)) / 1000))) : '';
-    const label = missed ? 'Missed' : out ? (c.status === 'declined' ? 'Declined' : c.status === 'busy' ? 'Busy' : 'Outgoing') : (c.status === 'declined' ? 'Declined' : 'Incoming');
+    const out = c.dir === 'out';
+    recentPeers[c.peerUid] = { uid: c.peerUid, name: c.peerName };
+    const missed = !out && ['missed', 'cancelled', 'ringing'].includes(c.status);
+    const dur = c.duration ? fmtDur(c.duration) : '';
+    const label = missed ? 'Missed' : c.status === 'declined' ? 'Declined' : c.status === 'busy' ? 'Busy'
+      : (!out || c.status === 'answered' || c.status === 'ended') ? (out ? 'Outgoing' : 'Incoming') : 'Not answered';
     return `<li>
-      <div class="avatar">${esc(initials(peer.name))}</div>
-      <div class="who"><b>${esc(peer.name)}</b><small class="dir ${missed ? 'missed' : ''}">${out ? '↗' : '↙'} ${label} ${c.type === 'video' ? 'video' : 'voice'}${dur ? ' · ' + dur : ''} · ${ago(ms(c.createdAt) || c.createdAtMs)}</small></div>
-      <button class="icon-btn" data-call="${peer.uid}" data-type="${c.type}"><svg><use href="#i-${c.type === 'video' ? 'video' : 'phone'}"/></svg></button>
+      <div class="avatar">${esc(initials(c.peerName))}</div>
+      <div class="who"><b>${esc(c.peerName)}</b><small class="dir ${missed ? 'missed' : ''}">${out ? '↗' : '↙'} ${label} ${c.type === 'video' ? 'video' : 'voice'}${dur ? ' · ' + dur : ''} · ${ago(c.createdAtMs)}</small></div>
+      <button class="icon-btn" data-call="${esc(c.peerUid)}" data-type="${c.type === 'video' ? 'video' : 'audio'}"><svg><use href="#i-${c.type === 'video' ? 'video' : 'phone'}"/></svg></button>
     </li>`;
   }).join('') : '<li class="empty">No calls yet</li>';
+}
+function writeLog(ownerUid, callId, data) {
+  return setDoc(doc(db, 'users', ownerUid, 'log', callId), data, { merge: true }).catch(() => {});
+}
+function logFinal(s) {
+  if (!s || !me) return;
+  const duration = s.startedAt ? Math.max(0, Math.round(((s.endedAt || Date.now()) - s.startedAt) / 1000)) : 0;
+  const upd = { status: s.finalStatus || 'ended', duration };
+  writeLog(me.uid, s.id, upd);
+  if (s.role === 'caller') writeLog(s.peer.uid, s.id, upd);
 }
 
 // ---------- Tabs ----------
 document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => {
   document.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('on', x === b));
   ['contacts', 'recents', 'admin', 'settings'].forEach((t) => $('tab-' + t).classList.toggle('hidden', t !== b.dataset.tab));
+  if (b.dataset.tab === 'settings') refreshChecks();
 }));
 $('opt-saver').checked = saverOn();
 $('opt-saver').addEventListener('change', (e) => { try { localStorage.setItem('saver', e.target.checked ? '1' : '0'); } catch (x) {} });
 
-// ---------- Admin ----------
-const call = (name) => httpsCallable(fns, name);
-function fnErr(e) { return (e && e.message ? e.message.replace(/^.*?:\s*/, '') : 'Failed') || 'Failed'; }
+// ---------- Admin (runs in the app — free plan) ----------
+async function newLogin(username, password) {
+  const ca = creator();
+  let email = `${username}@${DOMAIN}`;
+  let cred;
+  try {
+    cred = await createUserWithEmailAndPassword(ca, email, password);
+  } catch (e) {
+    if (!String(e.code).includes('email-already-in-use')) throw e;
+    // Old login with this name exists (deleted employee / password reset) → make a fresh hidden login.
+    email = `${username}.${Date.now().toString(36)}@${DOMAIN}`;
+    cred = await createUserWithEmailAndPassword(ca, email, password);
+  }
+  const uid = cred.user.uid;
+  await signOut(ca).catch(() => {});
+  return { uid, email };
+}
+function adminErr(e) {
+  const c = String((e && e.code) || (e && e.message) || '');
+  if (c.includes('weak-password')) return 'Password must be at least 6 characters';
+  if (c.includes('permission')) return 'Not allowed — are you an admin?';
+  if (c.includes('network')) return 'No internet connection';
+  if (c.includes('too-many')) return 'Too many attempts — wait a minute';
+  return 'Failed: ' + c.replace('auth/', '');
+}
 
 function watchAdmin() {
   unsubs.push(onSnapshot(collection(db, 'users'), (snap) => {
@@ -238,28 +311,32 @@ function watchAdmin() {
         <div class="who"><b>${esc(u.name)}${u.role === 'admin' ? '<span class="badge">admin</span>' : ''}${u.disabled ? '<span class="badge off">disabled</span>' : ''}</b>
           <small>@${esc(u.username)}${u.department ? ' · ' + esc(u.department) : ''}</small></div>
         <div class="actions">
-          <button class="btn small" data-adm="pass" data-uid="${u.uid}">Password</button>
-          ${u.uid === me.uid ? '' : `<button class="btn small" data-adm="${u.disabled ? 'enable' : 'disable'}" data-uid="${u.uid}">${u.disabled ? 'Enable' : 'Disable'}</button>
+          ${u.uid === me.uid ? '' : `<button class="btn small" data-adm="pass" data-uid="${u.uid}">Password</button>
+          <button class="btn small" data-adm="${u.disabled ? 'enable' : 'disable'}" data-uid="${u.uid}">${u.disabled ? 'Enable' : 'Disable'}</button>
           <button class="btn small" data-adm="delete" data-uid="${u.uid}">Delete</button>`}
         </div>
       </li>`).join('');
     $('admin-list')._users = all;
-  }));
+  }, () => {}));
 }
 
 $('add-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const msg = $('add-msg'); msg.textContent = 'Creating…';
   const btn = e.target.querySelector('button'); btn.disabled = true;
+  const name = $('a-name').value.trim(), username = cleanUser($('a-user').value), password = $('a-pass').value;
+  const department = $('a-dept').value.trim(), role = $('a-role').value === 'admin' ? 'admin' : 'employee';
   try {
-    await call('adminCreateUser')({
-      name: $('a-name').value.trim(), username: $('a-user').value.trim().toLowerCase(),
-      password: $('a-pass').value, department: $('a-dept').value.trim(), role: $('a-role').value,
-    });
+    if (!/^[a-z0-9._-]{3,30}$/.test(username)) throw { code: 'Username: 3–30 lowercase letters, numbers, . _ -' };
+    const taken = await getDoc(doc(db, 'usernames', username));
+    if (taken.exists()) throw { code: 'That username is already taken' };
+    const { uid, email } = await newLogin(username, password);
+    await setDoc(doc(db, 'users', uid), { name, username, department, role, disabled: false, createdAt: serverTimestamp(), createdBy: me.uid });
+    await setDoc(doc(db, 'usernames', username), { email, uid });
     msg.textContent = '';
-    toast(`Account created — username: ${$('a-user').value.trim().toLowerCase()}`, 4000);
+    toast(`Account created — username: ${username}`, 4000);
     e.target.reset();
-  } catch (err) { msg.textContent = fnErr(err); }
+  } catch (err) { msg.textContent = err.code && !String(err.code).includes('/') ? err.code : adminErr(err); }
   btn.disabled = false;
 });
 
@@ -270,32 +347,40 @@ $('admin-list').addEventListener('click', async (e) => {
     if (b.dataset.adm === 'pass') {
       const p = prompt(`New password for ${u.name} (min 6 characters):`);
       if (!p) return;
-      await call('adminUpdateUser')({ uid: u.uid, password: p });
-      toast('Password changed');
+      if (p.length < 6) return toast('Password must be at least 6 characters');
+      // Free plan can't change another person's password directly, so give them a fresh login
+      // behind the same username, and move their profile across.
+      const { uid, email } = await newLogin(u.username, p);
+      const { uid: _old, ...profile } = u;
+      await setDoc(doc(db, 'users', uid), { ...profile, lastSeen: null, createdAt: serverTimestamp() });
+      await setDoc(doc(db, 'usernames', u.username), { email, uid });
+      await deleteDoc(doc(db, 'users', u.uid));
+      toast(`Password changed for ${u.name}`);
     } else if (b.dataset.adm === 'disable' || b.dataset.adm === 'enable') {
-      await call('adminUpdateUser')({ uid: u.uid, disabled: b.dataset.adm === 'disable' });
+      await updateDoc(doc(db, 'users', u.uid), { disabled: b.dataset.adm === 'disable' });
       toast(b.dataset.adm === 'disable' ? 'Account disabled' : 'Account enabled');
     } else if (b.dataset.adm === 'delete') {
       if (!confirm(`Delete ${u.name}'s account permanently?`)) return;
-      await call('adminDeleteUser')({ uid: u.uid });
+      await deleteDoc(doc(db, 'users', u.uid));
+      await deleteDoc(doc(db, 'usernames', u.username)).catch(() => {});
       toast('Account deleted');
     }
-  } catch (err) { toast(fnErr(err)); }
+  } catch (err) { toast(adminErr(err)); }
 });
 
 // ---------- Calling ----------
+let speakerOn = false, muted = false, camOn = true;
 function setSpeaker(on) {
   speakerOn = on;
   $('b-speaker').classList.toggle('active', on);
-  if (native) AudioRoute.setSpeaker({ on }).catch(() => {});
+  if (native) Native.setSpeaker({ on }).catch(() => {});
 }
-let speakerOn = false, muted = false, camOn = true;
 
-function hooks(peerName) {
+function hooks() {
   return {
     onRemoteStream: (stream) => {
-      $('remote-audio').srcObject = stream;
       if (current?.type === 'video') { $('remote-video').srcObject = stream; $('remote-audio').srcObject = null; }
+      else $('remote-audio').srcObject = stream;
       $('remote-video').play?.().catch(() => {}); $('remote-audio').play?.().catch(() => {});
     },
     onState: (t) => { if (t) $('c-status').textContent = t; else startTimerLabel(); },
@@ -319,42 +404,48 @@ function startTimerLabel() {
 function openCallUi(peerName, type) {
   muted = false; camOn = true;
   $('b-mute').classList.remove('active'); $('b-cam').classList.remove('active');
+  $('local-video').style.visibility = 'visible';
   $('c-name').textContent = peerName; $('c-avatar').textContent = initials(peerName);
   $('c-quality').textContent = '';
   $('s-call').classList.toggle('is-video', type === 'video');
   $('s-call').classList.remove('video-on');
   $('local-video').classList.remove('back');
   show('s-call');
-  if (native) AudioRoute.startCall({ video: type === 'video' }).catch(() => {});
+  if (native) Native.startCall({ video: type === 'video' }).catch(() => {});
   setSpeaker(type === 'video');
 }
 
 async function startCall(peer, type) {
   if (current) return toast('Already in a call');
   if (!navigator.onLine) return toast('No internet connection');
-  current = new CallSession({ db, me, peer, type, role: 'caller', saver: saverOn(), hooks: hooks(peer.name) });
+  current = new CallSession({ db, me, peer, type, role: 'caller', saver: saverOn(), hooks: hooks() });
   openCallUi(peer.name, type);
   $('c-status').textContent = 'Calling…';
+  const s = current;
   try {
-    await current.start();
-    if (type === 'video') $('local-video').srcObject = current.local;
-    Tone.ringback();
+    await s.start();
+    const now = Date.now();
+    writeLog(me.uid, s.id, { peerUid: peer.uid, peerName: peer.name, dir: 'out', type, status: 'ringing', createdAtMs: now });
+    writeLog(peer.uid, s.id, { peerUid: me.uid, peerName: me.name, dir: 'in', type, status: 'ringing', createdAtMs: now });
+    if (type === 'video' && current === s) $('local-video').srcObject = s.local;
+    if (current === s && !s.connectedOnce) Tone.ringback();
   } catch (e) {
     console.warn(e);
     const why = e && e.name === 'NotAllowedError' ? 'Allow microphone/camera permission' : 'Could not start the call';
-    current.finish(why);
+    s.finish(why);
   }
 }
 
 function endUi(why) {
+  const s = current;
   Tone.stop();
   clearInterval(callTimer);
-  if (native) AudioRoute.endCall().catch(() => {});
+  if (native) Native.endCall().catch(() => {});
   $('remote-video').srcObject = null; $('remote-audio').srcObject = null; $('local-video').srcObject = null;
   current = null;
+  logFinal(s);
   if (why) toast(why);
   show(me ? 's-main' : 's-login');
-  clearNotifications();
 }
 
 $('b-end').addEventListener('click', () => current?.hangup());
@@ -379,48 +470,59 @@ function watchIncoming() {
           updateDoc(ch.doc.ref, { status: 'busy', endedAt: serverTimestamp() }).catch(() => {});
           return;
         }
+        updateDoc(ch.doc.ref, { delivered: true }).catch(() => {});
         showIncoming(id, d);
       }
       if (ch.type === 'removed' && incoming && incoming.id === id) {
-        // caller hung up / timed out / answered on another device
-        if (!incoming.accepting) { Tone.stop(); incoming = null; toast(`Missed call from ${d.fromName}`); show('s-main'); clearNotifications(); }
+        if (!incoming.accepting) {
+          Tone.stop(); incoming = null;
+          if (native) { Native.cancelIncoming().catch(() => {}); Native.showMissed({ callId: id, fromName: d.fromName, callType: d.type }).catch(() => {}); }
+          toast(`Missed call from ${d.fromName}`); show('s-main');
+        }
       }
     });
   }, (err) => console.warn('incoming', err)));
 }
 
-function showIncoming(id, d) {
+async function showIncoming(id, d) {
   incoming = { id, data: d };
   $('in-name').textContent = d.fromName;
   $('in-avatar').textContent = initials(d.fromName);
   $('in-type').textContent = d.type === 'video' ? 'Incoming HD video call' : 'Incoming HD voice call';
   show('s-incoming');
-  Tone.ring();
+  let rangNatively = false;
+  if (native) {
+    try { rangNatively = (await Native.ringIncoming({ callId: id, fromName: d.fromName, callType: d.type })).shown; } catch (e) {}
+  }
+  if (!rangNatively && incoming && incoming.id === id) Tone.ring();
   if (pendingLink && pendingLink.id === id) { const a = pendingLink.action; pendingLink = null; if (a === 'answer') acceptIncoming(); if (a === 'decline') declineIncoming(); }
 }
 
 async function acceptIncoming() {
   if (!incoming || incoming.accepting) return;
   incoming.accepting = true;
-  Tone.stop(); clearNotifications();
+  Tone.stop();
+  if (native) Native.cancelIncoming().catch(() => {});
   const { id, data } = incoming;
-  current = new CallSession({ db, me, peer: { uid: data.from, name: data.fromName }, type: data.type, role: 'callee', callId: id, saver: saverOn(), hooks: hooks(data.fromName) });
+  current = new CallSession({ db, me, peer: { uid: data.from, name: data.fromName }, type: data.type, role: 'callee', callId: id, saver: saverOn(), hooks: hooks() });
+  const s = current;
   openCallUi(data.fromName, data.type);
   $('c-status').textContent = 'Connecting…';
   try {
-    await current.accept(data);
-    if (data.type === 'video') $('local-video').srcObject = current.local;
+    await s.accept(data);
+    if (data.type === 'video' && current === s) $('local-video').srcObject = s.local;
   } catch (e) {
     console.warn(e);
-    current.setStatus('ended');
-    current.finish(e && e.name === 'NotAllowedError' ? 'Allow microphone/camera permission' : 'Could not connect');
+    s.setStatus('ended');
+    s.finish(e && e.name === 'NotAllowedError' ? 'Allow microphone/camera permission' : 'Could not connect');
   }
   incoming = null;
 }
 
 async function declineIncoming() {
   if (!incoming) return;
-  Tone.stop(); clearNotifications();
+  Tone.stop();
+  if (native) Native.cancelIncoming().catch(() => {});
   const ref = doc(db, 'calls', incoming.id);
   incoming = null;
   show('s-main');
@@ -429,16 +531,16 @@ async function declineIncoming() {
 $('in-accept').addEventListener('click', acceptIncoming);
 $('in-decline').addEventListener('click', declineIncoming);
 
-function clearNotifications() { if (native) PushNotifications.removeAllDeliveredNotifications().catch(() => {}); }
-
 // ---------- Notification taps: fitxcall://call?id=...&action=answer|decline|open ----------
 function handleLink(url) {
   if (!url || !url.startsWith('fitxcall://')) return;
   const u = new URL(url.replace('fitxcall://', 'https://x/'));
   const id = u.searchParams.get('id'); const action = u.searchParams.get('action') || 'open';
   if (!id) return;
-  if (incoming && incoming.id === id) { if (action === 'answer') acceptIncoming(); else if (action === 'decline') declineIncoming(); }
-  else pendingLink = { id, action };
+  if (incoming && incoming.id === id) {
+    if (action === 'answer') acceptIncoming();
+    else if (action === 'decline') declineIncoming();
+  } else pendingLink = { id, action };
 }
 if (native) {
   App.addListener('appUrlOpen', (e) => handleLink(e.url));
@@ -449,9 +551,14 @@ if (native) {
     if (!onTeam) document.querySelector('.tabs button[data-tab="contacts"]').click();
     else App.minimizeApp();
   });
-  App.addListener('resume', () => { ping(); clearNotificationsIfIdle(); });
+  App.addListener('appStateChange', ({ isActive }) => {
+    inBackground = !isActive;
+    if (isActive) {
+      ping(); refreshChecks();
+      if (incoming && !current) { Native.cancelIncoming().catch(() => {}); if (!Tone.timer) Tone.ring(); }
+    }
+  });
 }
-function clearNotificationsIfIdle() { if (!incoming) clearNotifications(); }
 
 window.addEventListener('online', () => toast('Back online'));
 window.addEventListener('offline', () => toast('No internet connection'));

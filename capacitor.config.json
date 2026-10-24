@@ -4,10 +4,5 @@
   "webDir": "www",
   "android": {
     "backgroundColor": "#0b0b0c"
-  },
-  "plugins": {
-    "PushNotifications": {
-      "presentationOptions": []
-    }
   }
 }

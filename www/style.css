@@ -88,3 +88,8 @@ input:focus, select:focus { border-color: var(--orange); }
 .toast { position: fixed; left: 50%; bottom: calc(80px + var(--safe-b)); transform: translateX(-50%) translateY(20px); background: #fff; color: #111;
   padding: 10px 16px; border-radius: 10px; font-size: 14px; opacity: 0; transition: .25s; pointer-events: none; z-index: 99; max-width: 88vw; text-align: center; }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+.checks { list-style: none; padding: 0; margin: 10px 0 0; }
+.checks li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.checks li:first-child { border-top: 0; }
+.checks .ok { color: var(--green); } .checks .bad { color: var(--orange2); }

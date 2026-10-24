@@ -1,6 +1,8 @@
 package qa.fitx.call;
 
+import android.Manifest;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -18,6 +20,9 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
         CallNotifications.ensureChannels(this);
         handleCallIntent(getIntent());
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[] { Manifest.permission.POST_NOTIFICATIONS }, 501);
+        }
     }
 
     @Override

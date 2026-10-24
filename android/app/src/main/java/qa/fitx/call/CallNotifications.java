@@ -86,6 +86,28 @@ public final class CallNotifications {
         if (nm != null) nm.cancel(ID_INCOMING);
     }
 
+    static void showClosed(Context ctx) {
+        ensureChannels(ctx);
+        Intent i = new Intent(ctx, MainActivity.class);
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        PendingIntent pi = PendingIntent.getActivity(ctx, 5, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        Notification n = new NotificationCompat.Builder(ctx, CH_MISSED)
+            .setSmallIcon(android.R.drawable.stat_notify_error)
+            .setContentTitle("FitX Call is closed")
+            .setContentText("Tap to open it again so you can receive calls")
+            .setColor(0xFFFF6A13)
+            .setAutoCancel(true)
+            .setContentIntent(pi)
+            .build();
+        NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm != null) nm.notify(7002, n);
+    }
+
+    static void cancelClosed(Context ctx) {
+        NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm != null) nm.cancel(7002);
+    }
+
     static void showMissed(Context ctx, String callId, String fromName, String callType) {
         ensureChannels(ctx);
         Intent i = new Intent(ctx, MainActivity.class);

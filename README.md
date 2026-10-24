@@ -1,77 +1,52 @@
 # FitX Call — Employee HD Voice & Video Calling
 
-Private calling app for FitX Sports Equipment Services staff.
+Private calling app for FitX Sports Equipment Services staff. Runs on the **free Firebase Spark plan** (no billing, no card).
 
-- **HD voice** (Opus 48 kHz wideband, up to 64 kbps, packet-loss protection) and **HD video** (720p / 30 fps, auto-adapts to the network)
-- **Each employee gets their own username + password** — created by the admin inside the app
-- **Rings like WhatsApp** — full-screen incoming call on the lock screen, even when the app is closed
+- **HD voice** (Opus 48 kHz wideband, up to 64 kbps, packet-loss protection) and **HD video** (720p / 30 fps, adapts to the network)
+- **Each employee gets their own username + password**, created by the admin inside the app (Admin tab)
+- Admin can add employees, reset passwords, disable or delete accounts; employees can change their own password
+- Incoming calls ring with a full-screen screen on the lock screen while the app runs in the background
 - Mute, speaker/earpiece, camera on/off, front/back camera, call timer, live quality indicator
-- Recents with missed calls, online status, search
-- **Data saver** switch (360p video) for weak mobile data
-- Lite: ~5 MB APK, no audio/image files, FitX black & orange design
+- Recents with missed calls, online status, search, **Data saver** (360p video)
+- Lite: ~4.5 MB APK, FitX black & orange design
 
----
+## Setup (one time, free)
 
-## One-time setup (≈20 minutes, all doable from a phone browser)
+1. **Firebase project** — already created (`studio-1166518588-1f04b`), app files already in this repo.
+2. Open **https://shell.cloud.google.com/?show=terminal** (signed in with the Google account that owns the Firebase project) and paste:
+   ```
+   bash <(curl -fsSL https://raw.githubusercontent.com/fitxqa/fitx-call/main/cloudshell-setup.sh)
+   ```
+   It turns on the database, username/password sign-in and the security rules, then asks you for your **admin username and password**.
+3. Install **FitX-Call.apk** from **[Releases](https://github.com/fitxqa/fitx-call/releases/latest)** on each phone, sign in, and add employees in the **Admin** tab.
 
-### 1. Firebase project
-1. Go to <https://console.firebase.google.com> → **Add project** → name it `fitx-call`.
-2. **Upgrade to Blaze (pay-as-you-go)** — bottom-left "Upgrade". Needed for the ringing push. For a small team this stays inside the free quota (normally QAR 0/month). Set a budget alert of $1 to be safe.
-3. **Build → Authentication → Get started → Email/Password → Enable → Save.**
-4. **Build → Firestore Database → Create database** → location **`europe-west1 (Belgium)`** → Production mode.
-   *(The location must match `REGION` in `functions/index.js`.)*
+## Making calls ring reliably (free plan)
 
-### 2. Add the apps in Firebase (Project settings ⚙️ → General → Your apps)
-1. **Web app** (`</>` icon) → nickname `fitx-call-web` → Register. Copy the config values into **`www/firebase-config.js`** (edit the file on GitHub with the ✏️ pencil).
-2. **Android app** → package name **`qa.fitx.call`** → Register → **download `google-services.json`**.
-   Add it to the repo at **`android/app/google-services.json`** (GitHub → Add file → Upload files), **or** paste its full text into a repo secret named `GOOGLE_SERVICES_JSON`.
+The free plan has no server push, so the app itself stays running in the background and shows a small **"Ready to receive calls"** notification.
+On each phone, open **Settings** in the app and fix every ✗:
+- Notifications allowed
+- Battery: unrestricted
+- Show calls on lock screen
 
-### 3. Deploy the backend from GitHub
-1. Firebase ⚙️ → **Service accounts** → **Generate new private key** → downloads a `.json` file.
-2. Give that account permission to deploy: open <https://console.cloud.google.com/iam-admin/iam> (select the project) → find `firebase-adminsdk-…@…` → ✏️ → **Add another role → Owner** → Save.
-3. In GitHub: repo → **Settings → Secrets and variables → Actions → New repository secret**:
-   | Name | Value |
-   |---|---|
-   | `FIREBASE_SERVICE_ACCOUNT` | the full text of the `.json` key file |
-   | `ADMIN_USERNAME` | your login, e.g. `admin` |
-   | `ADMIN_PASSWORD` | your password (6+ characters) |
-   | `ADMIN_NAME` | your name (optional) |
-   | `FITX_KEYSTORE_B64` | app signing key (from the signing-secrets file) |
-   | `FITX_KEYSTORE_PASSWORD` | signing key password (same file) |
-4. **Actions → "Deploy backend (Firebase)" → Run workflow.**
-   First deploy can fail once with a permissions/Eventarc message — wait 3 minutes and run it again.
+Then **don't swipe FitX Call away** from recent apps (if you do, it notifies you to reopen it).
+Xiaomi / Redmi / Oppo / Vivo / Huawei: also allow **Autostart** in the phone's app settings.
 
-### 4. Build & install the APK
-- Every push to `main` builds automatically. Or: **Actions → Build APK → Run workflow**.
-- When it's green: repo → **Releases** → latest → download **`FitX-Call.apk`** on the phone → install (allow "Install unknown apps").
-- New versions install over the old one (same signing key).
-
-### 5. Add employees
-Sign in with your admin username → **Admin** tab → enter name, username, password, department → **Create account**.
-Share the username + password with the employee. From the Admin tab you can also **change passwords, disable, or delete** accounts.
-
----
-
-## Important for reliable calls
-
-**TURN server (strongly recommended).** Calls work directly over Wi-Fi, but on 4G/5G (Ooredoo / Vodafone) some calls can't connect without a relay. Free option: create an account at <https://www.metered.ca/stun-turn>, copy the credentials into `turn: [...]` in `www/firebase-config.js`, push, and reinstall.
-
-**Phone battery settings (each employee, once).** Settings → Apps → FitX Call → Battery → **Unrestricted**; allow **Notifications**, **Lock-screen notifications**, and on Xiaomi/Oppo/Huawei **Autostart**. Otherwise some phones block calls while the app is closed.
+**Mobile data:** calls between 4G/5G phones may need a TURN relay. Free option: <https://www.metered.ca/stun-turn> — add the credentials to `turn: [...]` in `www/firebase-config.js`.
 
 ## How it works
-- **WebRTC** peer-to-peer media (encrypted DTLS-SRTP); audio/video never pass through Firebase.
-- **Firestore** = signaling (call offers/answers) + employee directory, locked down by `firestore.rules`.
-- **Cloud Functions** = push to ring the callee (FCM high-priority) + admin-only account management.
-- **Capacitor 8** Android wrapper with native full-screen call notification, speaker/earpiece routing and screen-off-at-ear.
+- **WebRTC** peer-to-peer, encrypted (DTLS-SRTP). Voice/video never pass through Firebase.
+- **Firestore** = call signaling, employee directory, per-user call history, protected by `firestore.rules`.
+- **Firebase Auth** = username/password logins (usernames map to hidden `@fitxcall.local` logins).
+- **Capacitor 8** Android app with a foreground service, native full-screen ringing, speaker/earpiece routing and screen-off-at-ear.
 
 ## Files
 | Path | What |
 |---|---|
-| `www/firebase-config.js` | **Your settings** (Firebase + TURN) |
+| `www/firebase-config.js` | Firebase + TURN settings |
 | `src/app.js`, `src/call.js` | App screens + calling engine |
-| `functions/index.js` | Push ringing + admin functions |
-| `firestore.rules` | Security rules |
-| `android/app/src/main/java/qa/fitx/call/` | Native ringing & audio routing |
-| `.github/workflows/` | APK build + backend deploy |
+| `firestore.rules` | Security rules (published by the setup script) |
+| `cloudshell-setup.sh` | Free one-command setup |
+| `android/app/src/main/java/qa/fitx/call/` | Background service, ringing, audio routing |
+| `.github/workflows/build-apk.yml` | Builds the signed APK on every push |
 
-The app signing key lives only in the GitHub secrets `FITX_KEYSTORE_B64` and `FITX_KEYSTORE_PASSWORD` — keep a backup copy; without it, new versions can't update the installed app.
+The APK signing key lives only in the GitHub secret `FITX_ALL` — keep a backup of FitX-Call-Secret.txt; without it, new versions can't update the installed app.

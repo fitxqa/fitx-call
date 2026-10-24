@@ -88,15 +88,18 @@
         <div><b>Data saver</b><p class="muted">Video at 360p — use on weak mobile data</p></div>
         <label class="switch"><input type="checkbox" id="opt-saver"><span></span></label>
       </div>
-      <div class="card setting">
-        <div><b>Call ringing</b><p class="muted" id="push-state">Checking…</p></div>
+      <div class="card">
+        <b>Make sure calls ring</b>
+        <p class="muted">Fix anything marked ✗. Keep FitX Call open in the background — don't swipe it away from recent apps.</p>
+        <ul class="checks" id="checks"><li class="muted">Checking…</li></ul>
       </div>
       <div class="card">
-        <b>Ringing when the app is closed</b>
-        <p class="muted">On Xiaomi, Oppo, Huawei, Samsung: Settings → Apps → FitX Call → Battery → <b>Unrestricted</b>, and allow <b>Autostart</b> and <b>Lock-screen</b> notifications.</p>
+        <b>Phone brand extra step</b>
+        <p class="muted">Xiaomi / Redmi / Oppo / Vivo / Huawei: Settings → Apps → FitX Call → allow <b>Autostart</b>, Battery <b>No restrictions</b>, and <b>Show on lock screen</b>.</p>
       </div>
+      <button id="change-pass" class="btn ghost wide">Change my password</button>
       <button id="logout" class="btn ghost wide">Sign out</button>
-      <p class="muted center-text">FitX Call v1.0</p>
+      <p class="muted center-text" id="ver">FitX Call</p>
     </div>
 
     <nav class="tabs">

@@ -298,6 +298,7 @@ export class CallSession {
   }
 
   setStatus(status) {
+    this.status = status;
     return updateDoc(this.callRef, { status, endedAt: serverTimestamp(), endedBy: this.me.uid }).catch(() => {});
   }
 
@@ -311,6 +312,8 @@ export class CallSession {
   finish(why) {
     if (this.ended) return;
     this.ended = true;
+    this.endedAt = Date.now();
+    this.finalStatus = this.connectedOnce ? 'answered' : (this.status || 'ended');
     clearTimeout(this.ringTimer); clearTimeout(this.discTimer); clearTimeout(this.failTimer);
     clearInterval(this.statsTimer);
     this.unsubs.forEach((u) => u());
