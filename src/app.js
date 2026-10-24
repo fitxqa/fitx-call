@@ -64,19 +64,19 @@ if (configured) {
   fb = initializeApp(CFG.firebase);
   auth = initializeAuth(fb, { persistence: [indexedDBLocalPersistence, browserLocalPersistence] });
   // Long-polling is the most reliable connection mode inside Android WebViews and on strict mobile networks.
-  db = initializeFirestore(fb, { experimentalForceLongPolling: true });
+  db = initializeFirestore(fb, { experimentalForceLongPolling: true }, CFG.databaseId || '(default)');
 }
 const DOMAIN = CFG.loginDomain || 'fitxcall.local';
 const withTimeout = (p, ms, code) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej({ code }), ms))]);
 // Ask Google directly why the database can't be reached (the SDK only says "offline").
 async function diagnoseDb() {
   try {
-    const url = `https://firestore.googleapis.com/v1/projects/${CFG.firebase.projectId}/databases/(default)/documents/config/setup?key=${CFG.firebase.apiKey}`;
+    const url = `https://firestore.googleapis.com/v1/projects/${CFG.firebase.projectId}/databases/${encodeURIComponent(CFG.databaseId || '(default)')}/documents/config/setup?key=${CFG.firebase.apiKey}`;
     const r = await withTimeout(fetch(url), 10000, 'net');
     let msg = '';
     try { const j = await r.json(); msg = (j.error && (j.error.message || j.error.status)) || ''; } catch (e) {}
     if (r.ok) return 'DB OK (200)';
-    if (r.status === 404 && /does not exist/i.test(msg)) return 'The (default) Firestore database does not exist yet';
+    if (r.status === 404 && /does not exist/i.test(msg)) return `Firestore database "${CFG.databaseId || '(default)'}" does not exist`;
     if (r.status === 404) return 'DB reachable (404 = setup not done yet)';
     return `DB error ${r.status}: ${msg.slice(0, 160)}`;
   } catch (e) { return 'Phone cannot reach Google servers (internet / VPN / firewall)'; }

@@ -13,11 +13,11 @@ window.FITX_CONFIG = {
     appId: "1:455163319161:android:34930a36b5b99edb3855a8"
   },
 
-  // Must match the region in functions/index.js
-  functionsRegion: "europe-west1",
+  // Firestore database ID in this project (yours is named "default", without brackets)
+  databaseId: "default",
 
   // Usernames are turned into hidden logins like  ahmed@fitxcall.local
-  // (no real email is needed). Must match functions/index.js
+  // (no real email is needed).
   loginDomain: "fitxcall.local",
 
   // OPTIONAL but strongly recommended for calls over mobile data (4G/5G):
