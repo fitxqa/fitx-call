@@ -6,7 +6,7 @@ import {
   updatePassword, reauthenticateWithCredential, EmailAuthProvider,
 } from 'firebase/auth';
 import {
-  getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection, query, where, orderBy, limit,
+  initializeFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection, query, where, orderBy, limit,
   onSnapshot, serverTimestamp,
 } from 'firebase/firestore';
 import { Capacitor, registerPlugin } from '@capacitor/core';
@@ -63,9 +63,11 @@ let fb, auth, db;
 if (configured) {
   fb = initializeApp(CFG.firebase);
   auth = initializeAuth(fb, { persistence: [indexedDBLocalPersistence, browserLocalPersistence] });
-  db = getFirestore(fb);
+  // Long-polling is the most reliable connection mode inside Android WebViews and on strict mobile networks.
+  db = initializeFirestore(fb, { experimentalForceLongPolling: true });
 }
 const DOMAIN = CFG.loginDomain || 'fitxcall.local';
+const withTimeout = (p, ms, code) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej({ code }), ms))]);
 const cleanUser = (u) => String(u || '').trim().toLowerCase();
 
 // A second Firebase instance so the admin can create accounts without being signed out.
@@ -89,7 +91,7 @@ let inBackground = false;
 // ---------- Auth ----------
 async function emailFor(username) {
   try {
-    const m = await getDoc(doc(db, 'usernames', username));
+    const m = await withTimeout(getDoc(doc(db, 'usernames', username)), 8000, 'db-timeout');
     if (m.exists() && m.data().email) return m.data().email;
   } catch (e) { /* rules not published yet → fall back */ }
   return `${username}@${DOMAIN}`;
@@ -101,14 +103,20 @@ $('login-form').addEventListener('submit', async (e) => {
   const btn = e.target.querySelector('button'); btn.disabled = true; btn.textContent = 'Signing in…';
   try {
     const u = cleanUser($('login-user').value);
-    await signInWithEmailAndPassword(auth, await emailFor(u), $('login-pass').value);
+    $('login-err').textContent = 'Connecting…';
+    const email = await emailFor(u);
+    $('login-err').textContent = 'Checking password…';
+    await withTimeout(signInWithEmailAndPassword(auth, email, $('login-pass').value), 20000, 'timeout');
+    $('login-err').textContent = 'Loading your account…';
   } catch (err) {
     const c = err.code || String(err.message || '');
     $('login-err').textContent = (c.includes('invalid') || c.includes('wrong') || c.includes('not-found')
       ? 'Wrong username or password' : c.includes('disabled') ? 'This account is disabled — contact admin'
         : c.includes('network') ? 'No internet connection'
           : c.includes('operation-not-allowed') ? 'Sign-in is not switched on in Firebase yet (Email/Password)'
-            : 'Sign-in failed') + (c ? ` (${c.replace('auth/', '')})` : '');
+            : c === 'timeout' ? 'Login server not responding — check internet and try again'
+              : c.includes('api-key') || c.includes('app-not-authorized') ? 'Firebase API key problem — tell the developer'
+                : 'Sign-in failed') + (c ? ` (${c.replace('auth/', '')})` : '');
   }
   btn.disabled = false; btn.textContent = 'Sign in';
 });
@@ -132,12 +140,15 @@ $('change-pass').addEventListener('click', async () => {
 
 async function onLogin(user) {
   let snap = null, readErr = null;
-  try { snap = await getDoc(doc(db, 'users', user.uid)); } catch (e) { readErr = e; }
+  try { snap = await withTimeout(getDoc(doc(db, 'users', user.uid)), 12000, 'db-timeout'); } catch (e) { readErr = e; }
   if (!snap || !snap.exists() || snap.data().disabled) {
     await signOut(auth);
     show('s-login');
+    const rc = readErr ? String(readErr.code || readErr.message || '') : '';
     $('login-err').textContent = readErr
-      ? 'Database not set up yet — run the setup step (security rules)'
+      ? (rc === 'db-timeout' || rc.includes('unavailable') ? 'Password OK, but the database is not reachable — run the Cloud Shell setup (database step)'
+        : rc.includes('permission') ? 'Password OK, but security rules are not published — run the Cloud Shell setup'
+          : 'Password OK, database error: ' + rc)
       : snap && snap.exists() ? 'This account is disabled — contact admin' : 'Account not set up — contact admin';
     return;
   }
