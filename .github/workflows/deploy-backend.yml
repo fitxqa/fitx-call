@@ -46,7 +46,12 @@ jobs:
         run: npm install --omit=dev --no-audit --no-fund
 
       - name: Deploy security rules, indexes and functions
-        run: npx -y firebase-tools@latest deploy --only firestore,functions --project "$PROJECT_ID" --non-interactive --force
+        run: |
+          set -o pipefail
+          if ! npx -y firebase-tools@latest deploy --only firestore,functions --project "$PROJECT_ID" --non-interactive --force 2>&1 | tee deploy.log; then
+            grep -iE "error|denied|permission|billing|blaze|not been used|enable|failed" deploy.log | head -25 | while IFS= read -r l; do echo "::error::$l"; done
+            exit 1
+          fi
 
       - name: Create first admin account
         working-directory: functions
