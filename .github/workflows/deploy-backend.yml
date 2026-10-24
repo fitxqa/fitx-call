@@ -16,10 +16,22 @@ jobs:
 
       - name: Firebase credentials
         env:
+          ALL: ${{ secrets.FITX_ALL }}
           SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          AU: ${{ secrets.ADMIN_USERNAME }}
+          AP: ${{ secrets.ADMIN_PASSWORD }}
+          AN: ${{ secrets.ADMIN_NAME }}
         run: |
-          if [ -z "$SA" ]; then echo "::error::Add the FIREBASE_SERVICE_ACCOUNT secret first (see README)"; exit 1; fi
+          if [ -n "$ALL" ]; then
+            J=$(printf '%s' "$ALL" | tr -d ' \n\r' | base64 -d)
+            SA=$(printf '%s' "$J" | jq -c .serviceAccount)
+            AU=$(printf '%s' "$J" | jq -r '.adminUsername // empty')
+            AP=$(printf '%s' "$J" | jq -r '.adminPassword // empty'); echo "::add-mask::$AP"
+            AN=$(printf '%s' "$J" | jq -r '.adminName // empty')
+          fi
+          if [ -z "$SA" ] || [ "$SA" = "null" ]; then echo "::error::Add the FITX_ALL secret first"; exit 1; fi
           printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          { echo "ADMIN_USERNAME=$AU"; echo "ADMIN_PASSWORD=$AP"; echo "ADMIN_NAME=$AN"; } >> "$GITHUB_ENV"
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
           echo "PROJECT_ID=$(jq -r .project_id "$RUNNER_TEMP/sa.json")" >> "$GITHUB_ENV"
 
@@ -32,8 +44,4 @@ jobs:
 
       - name: Create first admin account
         working-directory: functions
-        env:
-          ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
-          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
-          ADMIN_NAME: ${{ secrets.ADMIN_NAME }}
         run: node create-admin.js

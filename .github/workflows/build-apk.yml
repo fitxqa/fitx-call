@@ -39,11 +39,17 @@ jobs:
 
       - name: Signing key (from secrets)
         env:
+          ALL: ${{ secrets.FITX_ALL }}
           KS: ${{ secrets.FITX_KEYSTORE_B64 }}
           KP: ${{ secrets.FITX_KEYSTORE_PASSWORD }}
         run: |
+          if [ -n "$ALL" ]; then
+            J=$(printf '%s' "$ALL" | tr -d ' \n\r' | base64 -d)
+            KS=$(printf '%s' "$J" | jq -r .keystoreB64); KP=$(printf '%s' "$J" | jq -r .keystorePassword)
+            echo "::add-mask::$KP"
+          fi
           if [ -z "$KS" ] || [ -z "$KP" ]; then
-            echo "::error::Add the FITX_KEYSTORE_B64 and FITX_KEYSTORE_PASSWORD secrets (Settings → Secrets and variables → Actions), then re-run."; exit 1; fi
+            echo "::error::Add the FITX_ALL secret (Settings → Secrets and variables → Actions), then re-run."; exit 1; fi
           printf '%s' "$KS" | base64 -d > "$RUNNER_TEMP/fitx-call.keystore"
           echo "FITX_KEYSTORE=$RUNNER_TEMP/fitx-call.keystore" >> "$GITHUB_ENV"
           echo "FITX_KEYSTORE_PASSWORD=$KP" >> "$GITHUB_ENV"
