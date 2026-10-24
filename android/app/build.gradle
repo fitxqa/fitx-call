@@ -18,11 +18,12 @@ android {
     }
     signingConfigs {
         fitx {
+            // Key comes from GitHub secrets (FITX_KEYSTORE_B64 / FITX_KEYSTORE_PASSWORD).
             // Same key every build, so new APKs install as updates over old ones.
             storeFile file(System.getenv("FITX_KEYSTORE") ?: "fitx-call.keystore")
-            storePassword System.getenv("FITX_KEYSTORE_PASSWORD") ?: "fitxcall2026"
-            keyAlias System.getenv("FITX_KEY_ALIAS") ?: "fitxcall"
-            keyPassword System.getenv("FITX_KEY_PASSWORD") ?: "fitxcall2026"
+            storePassword System.getenv("FITX_KEYSTORE_PASSWORD") ?: ""
+            keyAlias "fitxcall"
+            keyPassword System.getenv("FITX_KEYSTORE_PASSWORD") ?: ""
         }
     }
     lint {

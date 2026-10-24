@@ -36,6 +36,8 @@ Private calling app for FitX Sports Equipment Services staff.
    | `ADMIN_USERNAME` | your login, e.g. `admin` |
    | `ADMIN_PASSWORD` | your password (6+ characters) |
    | `ADMIN_NAME` | your name (optional) |
+   | `FITX_KEYSTORE_B64` | app signing key (from the signing-secrets file) |
+   | `FITX_KEYSTORE_PASSWORD` | signing key password (same file) |
 4. **Actions → "Deploy backend (Firebase)" → Run workflow.**
    First deploy can fail once with a permissions/Eventarc message — wait 3 minutes and run it again.
 
@@ -72,4 +74,4 @@ Share the username + password with the employee. From the Admin tab you can also
 | `android/app/src/main/java/qa/fitx/call/` | Native ringing & audio routing |
 | `.github/workflows/` | APK build + backend deploy |
 
-The signing key `android/app/fitx-call.keystore` is in the repo so every build can update the app — **keep this repository private.**
+The app signing key lives only in the GitHub secrets `FITX_KEYSTORE_B64` and `FITX_KEYSTORE_PASSWORD` — keep a backup copy; without it, new versions can't update the installed app.

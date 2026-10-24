@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "455163319161",
+    "project_id": "studio-1166518588-1f04b",
+    "storage_bucket": "studio-1166518588-1f04b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:455163319161:android:34930a36b5b99edb3855a8",
+        "android_client_info": {
+          "package_name": "qa.fitx.call"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCPWg3BlHP6d4RDUySPDP-9gASpR6I37PM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

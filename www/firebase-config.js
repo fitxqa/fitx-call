@@ -5,12 +5,12 @@
 // ===================================================================
 window.FITX_CONFIG = {
   firebase: {
-    apiKey: "PASTE_API_KEY",
-    authDomain: "PASTE_PROJECT_ID.firebaseapp.com",
-    projectId: "PASTE_PROJECT_ID",
-    storageBucket: "PASTE_PROJECT_ID.firebasestorage.app",
-    messagingSenderId: "PASTE_SENDER_ID",
-    appId: "PASTE_APP_ID"
+    apiKey: "AIzaSyCPWg3BlHP6d4RDUySPDP-9gASpR6I37PM",
+    authDomain: "studio-1166518588-1f04b.firebaseapp.com",
+    projectId: "studio-1166518588-1f04b",
+    storageBucket: "studio-1166518588-1f04b.firebasestorage.app",
+    messagingSenderId: "455163319161",
+    appId: "1:455163319161:android:34930a36b5b99edb3855a8"
   },
 
   // Must match the region in functions/index.js

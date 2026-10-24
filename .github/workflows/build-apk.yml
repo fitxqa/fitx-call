@@ -37,6 +37,17 @@ jobs:
           if grep -q PASTE_API_KEY www/firebase-config.js; then
             echo "::warning::www/firebase-config.js still has placeholders — the app will show 'Setup needed'."; fi
 
+      - name: Signing key (from secrets)
+        env:
+          KS: ${{ secrets.FITX_KEYSTORE_B64 }}
+          KP: ${{ secrets.FITX_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KS" ] || [ -z "$KP" ]; then
+            echo "::error::Add the FITX_KEYSTORE_B64 and FITX_KEYSTORE_PASSWORD secrets (Settings → Secrets and variables → Actions), then re-run."; exit 1; fi
+          printf '%s' "$KS" | base64 -d > "$RUNNER_TEMP/fitx-call.keystore"
+          echo "FITX_KEYSTORE=$RUNNER_TEMP/fitx-call.keystore" >> "$GITHUB_ENV"
+          echo "FITX_KEYSTORE_PASSWORD=$KP" >> "$GITHUB_ENV"
+
       - name: Build web app
         run: npm run build
 
