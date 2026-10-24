@@ -93,3 +93,5 @@ input:focus, select:focus { border-color: var(--orange); }
 .checks li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 14px; }
 .checks li:first-child { border-top: 0; }
 .checks .ok { color: var(--green); } .checks .bad { color: var(--orange2); }
+
+#s-login { overflow-y: auto; justify-content: safe center; padding-bottom: 40px; }
