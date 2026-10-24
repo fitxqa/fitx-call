@@ -13,8 +13,8 @@ window.FITX_CONFIG = {
     appId: "1:455163319161:android:34930a36b5b99edb3855a8"
   },
 
-  // Firestore database ID in this project (yours is named "default", without brackets)
-  databaseId: "default",
+  // Firestore database: the app uses "(default)" if it exists, otherwise "default".
+  databaseIds: ["(default)", "default"],
 
   // Usernames are turned into hidden logins like  ahmed@fitxcall.local
   // (no real email is needed).
