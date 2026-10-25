@@ -102,25 +102,43 @@
     </div>
 
     <div id="tab-settings" class="tab hidden">
-      <div class="card">
-        <h3 id="set-name"></h3>
-        <p class="muted" id="set-user"></p>
+      <div class="card profile">
+        <div class="avatar" id="set-avatar"></div>
+        <div><h3 id="set-name"></h3><p class="muted" id="set-user"></p></div>
       </div>
-      <div class="card setting">
-        <div><b>Data saver</b><p class="muted">Video at 360p — use on weak mobile data</p></div>
-        <label class="switch"><input type="checkbox" id="opt-saver"><span></span></label>
+
+      <div class="status-banner" id="set-status">Checking this phone…</div>
+
+      <h3 class="sect">Calls &amp; messages</h3>
+      <div class="card list-card">
+        <div class="setting"><div><b>Ring when app is closed</b><p class="muted">Keeps a small "Ready to receive calls" notification</p></div>
+          <label class="switch"><input type="checkbox" id="opt-ring"><span></span></label></div>
+        <div class="setting"><div><b>Message notifications</b><p class="muted">Show new chat messages</p></div>
+          <label class="switch"><input type="checkbox" id="opt-msg"><span></span></label></div>
+        <div class="setting"><div><b>Voice calls on speaker</b><p class="muted">Start voice calls on loudspeaker</p></div>
+          <label class="switch"><input type="checkbox" id="opt-speaker"><span></span></label></div>
+        <div class="setting"><div><b>Data saver</b><p class="muted">Video at 360p on weak mobile data</p></div>
+          <label class="switch"><input type="checkbox" id="opt-saver"><span></span></label></div>
       </div>
-      <div class="card">
-        <b>Make sure calls ring</b>
-        <p class="muted">Fix anything marked ✗. Keep FitX Call open in the background — don't swipe it away from recent apps.</p>
-        <ul class="checks" id="checks"><li class="muted">Checking…</li></ul>
+
+      <h3 class="sect native-only">Phone permissions</h3>
+      <div class="card list-card native-only">
+        <div class="setting"><div><b>Notifications</b><p class="muted">Needed to ring and show messages</p></div>
+          <label class="switch"><input type="checkbox" id="perm-notif" data-perm="notif"><span></span></label></div>
+        <div class="setting"><div><b>Battery: no restrictions</b><p class="muted">Stops the phone from closing FitX Call</p></div>
+          <label class="switch"><input type="checkbox" id="perm-battery" data-perm="battery"><span></span></label></div>
+        <div class="setting"><div><b>Show calls on lock screen</b><p class="muted">Full-screen incoming call</p></div>
+          <label class="switch"><input type="checkbox" id="perm-full" data-perm="fullscreen"><span></span></label></div>
+        <div class="setting"><div><b>Autostart</b><p class="muted">Xiaomi, Redmi, Oppo, Vivo, Huawei, Honor</p></div>
+          <button class="btn small" id="perm-auto">Open</button></div>
       </div>
-      <div class="card">
-        <b>Phone brand extra step</b>
-        <p class="muted">Xiaomi / Redmi / Oppo / Vivo / Huawei: Settings → Apps → FitX Call → allow <b>Autostart</b>, Battery <b>No restrictions</b>, and <b>Show on lock screen</b>.</p>
+      <p class="muted native-only hint">Switches open your phone's settings — turn the option on there, then come back.</p>
+
+      <h3 class="sect">Account</h3>
+      <div class="card list-card">
+        <button class="row-btn" id="change-pass">Change my password <span>›</span></button>
+        <button class="row-btn danger" id="logout">Sign out <span>›</span></button>
       </div>
-      <button id="change-pass" class="btn ghost wide">Change my password</button>
-      <button id="logout" class="btn ghost wide">Sign out</button>
       <p class="muted center-text" id="ver">FitX Call</p>
     </div>
 
@@ -198,6 +216,18 @@
       <button class="round red" id="b-end"><svg><use href="#i-end"/></svg><span>End</span></button>
     </div>
   </section>
+
+  <div id="modal" class="modal hidden">
+    <form class="card form" id="modal-form">
+      <h3 id="modal-title"></h3>
+      <p class="muted" id="modal-text"></p>
+      <div id="modal-fields"></div>
+      <div class="row2">
+        <button type="button" class="btn ghost" id="modal-cancel">Cancel</button>
+        <button type="submit" class="btn primary" id="modal-ok">OK</button>
+      </div>
+    </form>
+  </div>
 
   <div id="toast" class="toast"></div>
 

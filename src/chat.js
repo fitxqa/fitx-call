@@ -40,6 +40,8 @@ export function createChat(ctx) {
         if (firstList || !c.lastAt || c.lastFrom === me.uid || (prev && c.lastAt <= prev)) continue;
         if (open && open.id === c.id && !document.hidden) continue;
         const name = (c.names && c.names[c.lastFrom]) || 'FitX';
+        let on = true; try { on = localStorage.getItem('msgNotif') !== '0'; } catch (e) {}
+        if (!on) continue;
         if (native) Native.showMessage({ chatId: c.id, fromName: name, text: c.lastText || 'New message' }).catch(() => {});
         if (!open || open.id !== c.id) toast(`💬 ${name}: ${c.lastText || 'New message'}`, 3000);
       }

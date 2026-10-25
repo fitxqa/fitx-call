@@ -5,33 +5,29 @@ Private calling app for FitX Sports Equipment Services staff. Runs on the **free
 - **HD voice** (Opus 48 kHz wideband, up to 64 kbps, packet-loss protection) and **HD video** (720p / 30 fps, adapts to the network)
 - **Each employee gets their own username + password**, created by the admin inside the app (Admin tab)
 - Admin can add employees, reset passwords, disable or delete accounts; employees can change their own password
-- Incoming calls ring with a full-screen screen on the lock screen while the app runs in the background
+- Incoming calls ring full-screen on the lock screen, even when the app is closed
 - Mute, speaker/earpiece, camera on/off, front/back camera, call timer, live quality indicator
 - Recents with missed calls, online status, search, **Data saver** (360p video)
 - Lite: ~4.5 MB APK, FitX black & orange design
 
 ## Setup (one time, free)
 
-1. **Firebase project** — already created (`studio-1166518588-1f04b`), app files already in this repo.
-2. Open **https://shell.cloud.google.com/?show=terminal** (signed in with the Google account that owns the Firebase project) and paste:
-   ```
-   bash <(curl -fsSL https://raw.githubusercontent.com/fitxqa/fitx-call/main/cloudshell-setup.sh)
-   ```
-   It turns on the database, username/password sign-in and the security rules, then asks you for your **admin username and password**.
-3. Install **FitX-Call.apk** from **[Releases](https://github.com/fitxqa/fitx-call/releases/latest)** on each phone, sign in, and add employees in the **Admin** tab.
+1. **Firestore:** a Standard-edition database `(default)` (europe-west1) with the rules from
+   [`firestore.rules`](https://raw.githubusercontent.com/fitxqa/fitx-call/main/firestore.rules) published.
+2. **Authentication:** Email/Password sign-in enabled.
+3. Install **FitX-Call.apk** from **[Releases](https://github.com/fitxqa/fitx-call/releases/latest)**.
+   The first person to sign in (or tap *First-time setup*) becomes the admin; then add employees in the **Admin** tab.
 
-## Making calls ring reliably (free plan)
+## In-app Settings
 
-The free plan has no server push, so the app itself stays running in the background and shows a small **"Ready to receive calls"** notification.
-On each phone, open **Settings** in the app and fix every ✗:
-- Notifications allowed
-- Battery: unrestricted
-- Show calls on lock screen
+- **Calls & messages:** Ring when app is closed · Message notifications · Voice calls on speaker · Data saver
+- **Phone permissions:** Notifications · Battery no restrictions · Show calls on lock screen · Autostart (opens the
+  Xiaomi/Oppo/Vivo/Huawei/Honor page). A banner at the top says whether calls will ring.
 
-Then **don't swipe FitX Call away** from recent apps (if you do, it notifies you to reopen it).
-Xiaomi / Redmi / Oppo / Vivo / Huawei: also allow **Autostart** in the phone's app settings.
-
-**Mobile data:** calls between 4G/5G phones may need a TURN relay. Free option: <https://www.metered.ca/stun-turn> — add the credentials to `turn: [...]` in `www/firebase-config.js`.
+Calls ring when the app is closed through a small background service ("Ready to receive calls" notification) that
+listens natively — no paid server push needed. Calls on mobile data go through the ExpressTURN relay set in
+`www/firebase-config.js`. Media in chats is stored in Firestore (free plan has no file Storage): photos are
+compressed, videos ≤ 8 MB, voice ≤ 3 min, and media auto-deletes after 30 days.
 
 ## How it works
 - **WebRTC** peer-to-peer, encrypted (DTLS-SRTP). Voice/video never pass through Firebase.

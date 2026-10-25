@@ -28,6 +28,21 @@ function toast(msg, ms = 2600) {
   const t = $('toast'); t.textContent = msg; t.classList.add('show');
   clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), ms);
 }
+// Small in-app dialog (passwords are hidden, unlike the browser prompt()).
+function ask({ title, text = '', fields = [], ok = 'OK' }) {
+  return new Promise((resolve) => {
+    $('modal-title').textContent = title;
+    $('modal-text').textContent = text;
+    $('modal-text').classList.toggle('hidden', !text);
+    $('modal-ok').textContent = ok;
+    $('modal-fields').innerHTML = fields.map((f, i) => `<label>${esc(f.label)}<input id="mf-${i}" type="${f.type || 'text'}" ${f.min ? `minlength="${f.min}"` : ''} autocomplete="off" ${f.required === false ? '' : 'required'}></label>`).join('');
+    $('modal').classList.remove('hidden');
+    setTimeout(() => { const first = $('mf-0'); if (first) first.focus(); }, 50);
+    const done = (val) => { $('modal').classList.add('hidden'); $('modal-form').onsubmit = null; $('modal-cancel').onclick = null; resolve(val); };
+    $('modal-cancel').onclick = () => done(null);
+    $('modal-form').onsubmit = (e) => { e.preventDefault(); done(fields.map((_, i) => $('mf-' + i).value)); };
+  });
+}
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const initials = (n) => String(n || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
 const ms = (ts) => (ts && ts.toMillis ? ts.toMillis() : typeof ts === 'number' ? ts : 0);
@@ -163,15 +178,18 @@ $('logout').addEventListener('click', async () => {
 });
 
 $('change-pass').addEventListener('click', async () => {
-  const cur = prompt('Current password:'); if (!cur) return;
-  const np = prompt('New password (6+ characters):'); if (!np) return;
-  if (np.length < 6) return toast('Password must be at least 6 characters');
+  const v = await ask({ title: 'Change my password', fields: [
+    { label: 'Current password', type: 'password' }, { label: 'New password (6+ characters)', type: 'password', min: 6 }], ok: 'Change' });
+  if (!v) return;
+  const [cur, np] = v;
   try {
     await reauthenticateWithCredential(auth.currentUser, EmailAuthProvider.credential(auth.currentUser.email, cur));
     await updatePassword(auth.currentUser, np);
+    nativeSignIn(auth.currentUser.email, np); // keep background ringing signed in
     toast('Password changed');
   } catch (e) { toast(String(e.code || '').includes('invalid') || String(e.code || '').includes('wrong') ? 'Current password is wrong' : 'Could not change password'); }
 });
+
 
 // ---------- First-time setup (no Cloud Shell needed) ----------
 let settingUp = false;
@@ -277,15 +295,19 @@ async function onLogin(user) {
   ping();
   heartbeat = setInterval(ping, 60000);
   if (native) {
-    Native.startService().catch(() => {}); refreshChecks();
-    setTimeout(async () => { if (me && !(await ensureNativeLogin(false))) ensureNativeLogin(true); }, 2500);
+    Native.setPref({ key: 'msgNotif', value: pref('msgNotif', true) }).catch(() => {});
+    if (pref('ringClosed', true)) {
+      Native.startService().catch(() => {});
+      setTimeout(async () => { if (me && !(await ensureNativeLogin(false))) ensureNativeLogin(true); }, 2500);
+    }
   }
-  else $('checks').innerHTML = '<li class="muted">Background ringing works in the Android app</li>';
+  refreshChecks();
 }
 
 function renderMe() {
   $('me-chip').textContent = me.name;
   $('set-name').textContent = me.name;
+  $('set-avatar').textContent = initials(me.name);
   $('set-user').textContent = `@${me.username}${me.department ? ' · ' + me.department : ''}${me.role === 'admin' ? ' · Admin' : ''}`;
   $('nav-admin').classList.toggle('hidden', me.role !== 'admin');
 }
@@ -319,39 +341,78 @@ async function ensureNativeLogin(askNow) {
   try { st = await Native.nativeStatus(); } catch (e) { return; }
   if (st.signedIn && st.uid === auth.currentUser.uid) return true;
   if (!askNow) return false;
-  const pw = prompt('Enter your password once so calls can ring when the app is closed:');
-  if (!pw) return false;
+  const v = await ask({ title: 'Ring when app is closed', text: 'Enter your password once so calls can ring even when FitX Call is closed.', fields: [{ label: 'Password', type: 'password' }], ok: 'Turn on' });
+  if (!v) return false;
+  const pw = v[0];
   const ok = await nativeSignIn(auth.currentUser.email, pw);
   toast(ok ? 'Done — calls will ring even when the app is closed' : 'Wrong password — try again in Settings', 3500);
+  if (ok) setPref('ringClosed', true);
   refreshChecks();
   return ok;
 }
 
+// ---------- Settings switches ----------
+const pref = (k, def) => { try { const v = localStorage.getItem(k); return v === null ? def : v === '1'; } catch (e) { return def; } };
+function setPref(k, on) {
+  try { localStorage.setItem(k, on ? '1' : '0'); } catch (e) {}
+  if (native && k === 'msgNotif') Native.setPref({ key: 'msgNotif', value: on }).catch(() => {});
+}
 async function refreshChecks() {
-  if (!native || !me) return;
+  $('opt-saver').checked = pref('saver', false);
+  $('opt-speaker').checked = pref('speakerDefault', false);
+  $('opt-msg').checked = pref('msgNotif', true);
+  if (!native) { $('opt-ring').checked = false; $('opt-ring').disabled = true; $('set-status').textContent = 'Install the Android app to receive calls in the background.'; return; }
+  if (!me) return;
   try {
     const r = await Native.checkReliability();
-    const row = (ok, label, fix, act) => `<li><span><span class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✗'}</span> ${label}</span>${ok ? '' : `<button class="btn small" data-fix="${act}">${fix}</button>`}</li>`;
-    $('checks').innerHTML = [
-      row(r.notifications, 'Notifications allowed', 'Allow', 'notif'),
-      row(r.battery, 'Battery: unrestricted', 'Fix', 'battery'),
-      row(r.fullScreen, 'Show calls on lock screen', 'Allow', 'fullscreen'),
-      row(r.service, 'Ready for calls in background', 'Start', 'service'),
-      row(!!(await ensureNativeLogin(false)), 'Ring when app is closed', 'Turn on', 'native'),
-    ].join('');
-    const bad = [r.notifications, r.battery, r.fullScreen].filter((x) => !x).length;
-    if (bad && !sessionStorage.getItem('warned')) { sessionStorage.setItem('warned', '1'); toast('Settings → fix the ✗ items so calls can ring', 4000); }
-  } catch (e) { $('checks').innerHTML = '<li class="muted">Could not check this phone</li>'; }
+    const nativeOk = !!(await ensureNativeLogin(false));
+    const ringOn = pref('ringClosed', true) && nativeOk && r.service;
+    $('opt-ring').checked = ringOn;
+    $('perm-notif').checked = !!r.notifications;
+    $('perm-battery').checked = !!r.battery;
+    $('perm-full').checked = !!r.fullScreen;
+    const missing = [];
+    if (!ringOn) missing.push('Ring when app is closed');
+    if (!r.notifications) missing.push('Notifications');
+    if (!r.battery) missing.push('Battery');
+    if (!r.fullScreen) missing.push('Lock screen');
+    const st = $('set-status');
+    st.classList.toggle('ok', !missing.length); st.classList.toggle('warn', !!missing.length);
+    st.textContent = missing.length ? `⚠ Calls may not ring — turn on: ${missing.join(', ')}` : '✓ All set — calls will ring even when the app is closed';
+    if (missing.length && !sessionStorage.getItem('warned')) { sessionStorage.setItem('warned', '1'); toast('Settings → turn on the switches so calls can ring', 4000); }
+  } catch (e) { $('set-status').textContent = 'Could not check this phone'; }
 }
-$('checks').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-fix]'); if (!b) return;
-  const a = b.dataset.fix;
+// App options
+$('opt-saver').addEventListener('change', (e) => setPref('saver', e.target.checked));
+$('opt-speaker').addEventListener('change', (e) => setPref('speakerDefault', e.target.checked));
+$('opt-msg').addEventListener('change', (e) => setPref('msgNotif', e.target.checked));
+$('opt-ring').addEventListener('change', async (e) => {
+  if (!native) return;
+  if (e.target.checked) {
+    setPref('ringClosed', true);
+    await Native.startService().catch(() => {});
+    await ensureNativeLogin(true);
+  } else {
+    setPref('ringClosed', false);
+    await Native.nativeSignOut().catch(() => {});
+    await Native.stopService().catch(() => {});
+    toast('Calls will only ring while FitX Call is open', 3500);
+  }
+  setTimeout(refreshChecks, 600);
+});
+// Phone permissions: switches open the system page (Android doesn't let apps flip these directly)
+document.querySelectorAll('[data-perm]').forEach((sw) => sw.addEventListener('change', (e) => {
+  e.target.checked = !e.target.checked; // real state is refreshed when you come back
+  const a = e.target.dataset.perm;
   if (a === 'notif') Native.openNotificationSettings();
   if (a === 'battery') Native.openBatterySettings();
   if (a === 'fullscreen') Native.openFullScreenSettings();
-  if (a === 'native') { ensureNativeLogin(true); return; }
-  if (a === 'service') Native.startService().then(() => setTimeout(refreshChecks, 800));
+}));
+$('perm-auto').addEventListener('click', async () => {
+  const r = await Native.openAutostart().catch(() => ({}));
+  if (!r.brandPage) toast('Find "Autostart" or "Background activity" here and turn it on', 4000);
 });
+if (!native) document.body.classList.add('web');
 
 // ---------- Team ----------
 function watchTeam() {
@@ -425,8 +486,7 @@ document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('cli
   ['contacts', 'chats', 'recents', 'admin', 'settings'].forEach((t) => $('tab-' + t).classList.toggle('hidden', t !== b.dataset.tab));
   if (b.dataset.tab === 'settings') refreshChecks();
 }));
-$('opt-saver').checked = saverOn();
-$('opt-saver').addEventListener('change', (e) => { try { localStorage.setItem('saver', e.target.checked ? '1' : '0'); } catch (x) {} });
+
 
 // ---------- Admin (runs in the app — free plan) ----------
 async function newLogin(username, password) {
@@ -497,8 +557,9 @@ $('admin-list').addEventListener('click', async (e) => {
   const u = ($('admin-list')._users || []).find((x) => x.uid === b.dataset.uid); if (!u) return;
   try {
     if (b.dataset.adm === 'pass') {
-      const p = prompt(`New password for ${u.name} (min 6 characters):`);
-      if (!p) return;
+      const v = await ask({ title: `New password for ${u.name}`, fields: [{ label: 'New password (6+ characters)', type: 'password', min: 6 }], ok: 'Change' });
+      if (!v) return;
+      const p = v[0];
       if (p.length < 6) return toast('Password must be at least 6 characters');
       // Free plan can't change another person's password directly, so give them a fresh login
       // behind the same username, and move their profile across.
@@ -578,7 +639,7 @@ function openCallUi(peerName, type) {
   $('local-video').classList.remove('back');
   show('s-call');
   if (native) Native.startCall({ video: type === 'video' }).catch(() => {});
-  setSpeaker(type === 'video');
+  setSpeaker(type === 'video' || pref('speakerDefault', false));
 }
 
 async function startCall(peer, type) {

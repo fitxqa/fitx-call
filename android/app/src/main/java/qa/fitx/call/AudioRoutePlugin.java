@@ -237,6 +237,50 @@ public class AudioRoutePlugin extends Plugin {
         call.resolve();
     }
 
+    // ---------- app preferences shared with the background service ----------
+    @PluginMethod
+    public void setPref(PluginCall call) {
+        NativeWatcher.prefs(getContext()).edit().putBoolean(call.getString("key", "x"), call.getBoolean("value", true)).apply();
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void getPrefs(PluginCall call) {
+        JSObject r = new JSObject();
+        r.put("msgNotif", NativeWatcher.prefs(getContext()).getBoolean("msgNotif", true));
+        call.resolve(r);
+    }
+
+    /** Opens the brand-specific "Autostart" page (Xiaomi, Oppo, Vivo, Huawei, Honor...), else app settings. */
+    @PluginMethod
+    public void openAutostart(PluginCall call) {
+        String[][] targets = {
+            { "com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity" },
+            { "com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity" },
+            { "com.coloros.safecenter", "com.coloros.safecenter.startupapp.StartupAppListActivity" },
+            { "com.oplus.safecenter", "com.oplus.safecenter.permission.startup.StartupAppListActivity" },
+            { "com.oppo.safe", "com.oppo.safe.permission.startup.StartupAppListActivity" },
+            { "com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.BgStartUpManagerActivity" },
+            { "com.iqoo.secure", "com.iqoo.secure.ui.phoneoptimize.AddWhiteListActivity" },
+            { "com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity" },
+            { "com.huawei.systemmanager", "com.huawei.systemmanager.optimize.process.ProtectActivity" },
+            { "com.hihonor.systemmanager", "com.hihonor.systemmanager.startupmgr.ui.StartupNormalAppListActivity" },
+            { "com.letv.android.letvsafe", "com.letv.android.letvsafe.AutobootManageActivity" },
+            { "com.asus.mobilemanager", "com.asus.mobilemanager.MainActivity" },
+        };
+        boolean opened = false;
+        for (String[] t : targets) {
+            try {
+                Intent i = new Intent().setComponent(new android.content.ComponentName(t[0], t[1])).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                if (i.resolveActivity(getContext().getPackageManager()) != null) { getContext().startActivity(i); opened = true; break; }
+            } catch (Exception ignored) {}
+        }
+        if (!opened) openAppSettings();
+        JSObject r = new JSObject();
+        r.put("brandPage", opened);
+        call.resolve(r);
+    }
+
     private void openAppSettings() {
         try {
             Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getContext().getPackageName()));

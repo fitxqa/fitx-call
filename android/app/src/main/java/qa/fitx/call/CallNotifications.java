@@ -111,6 +111,7 @@ public final class CallNotifications {
     }
 
     static void showMessage(Context ctx, String chatId, String fromName, String text) {
+        if (!NativeWatcher.prefs(ctx).getBoolean("msgNotif", true)) return; // turned off in Settings
         ensureChannels(ctx);
         Intent i = new Intent(ctx, MainActivity.class);
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
