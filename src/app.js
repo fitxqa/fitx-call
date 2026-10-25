@@ -414,6 +414,44 @@ $('perm-auto').addEventListener('click', async () => {
 });
 if (!native) document.body.classList.add('web');
 
+// ---------- Appearance: theme, accent, text size, layout, corners ----------
+const LOOK_DEFAULTS = { 'fx-theme': 'dark', 'fx-accent': 'orange', 'fx-text': '100', 'fx-density': 'comfortable', 'fx-corners': 'rounded' };
+const lookGet = (k) => { try { return localStorage.getItem(k) || LOOK_DEFAULTS[k]; } catch (e) { return LOOK_DEFAULTS[k]; } };
+const darkMQ = window.matchMedia ? matchMedia('(prefers-color-scheme: light)') : null;
+function applyLook() {
+  const d = document.documentElement;
+  let theme = lookGet('fx-theme');
+  if (theme === 'auto') theme = darkMQ && darkMQ.matches ? 'light' : 'dark';
+  d.dataset.theme = theme;
+  d.dataset.accent = lookGet('fx-accent');
+  d.dataset.density = lookGet('fx-density');
+  d.dataset.corners = lookGet('fx-corners');
+  const pct = Number(lookGet('fx-text')) || 100;
+  const bg = getComputedStyle(d).getPropertyValue('--bg').trim() || '#0b0b0c';
+  const light = theme === 'light' || theme === 'sand';
+  const meta = document.querySelector('meta[name="theme-color"]'); if (meta) meta.content = bg;
+  if (native) {
+    Native.setTextZoom({ percent: pct }).catch(() => {});
+    Native.setSystemBars({ color: bg, light }).catch(() => {});
+  } else document.body.style.zoom = pct / 100;
+  document.querySelectorAll('#appearance [data-opt]').forEach((g) => {
+    const v = lookGet(g.dataset.opt);
+    g.querySelectorAll('[data-v]').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
+  });
+}
+$('appearance').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-v]'); if (!b) return;
+  const g = b.closest('[data-opt]'); if (!g) return;
+  try { localStorage.setItem(g.dataset.opt, b.dataset.v); } catch (x) {}
+  applyLook();
+});
+$('look-reset').addEventListener('click', () => {
+  Object.keys(LOOK_DEFAULTS).forEach((k) => { try { localStorage.removeItem(k); } catch (x) {} });
+  applyLook(); toast('Back to the FitX look');
+});
+if (darkMQ && darkMQ.addEventListener) darkMQ.addEventListener('change', () => { if (lookGet('fx-theme') === 'auto') applyLook(); });
+applyLook();
+
 // ---------- Team ----------
 function watchTeam() {
   unsubs.push(onSnapshot(collection(db, 'users'), (snap) => {

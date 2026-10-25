@@ -6,6 +6,18 @@
   <meta name="theme-color" content="#0b0b0c">
   <title>FitX Call</title>
   <link rel="stylesheet" href="style.css">
+  <script>
+    // Apply saved look before first paint (no flash)
+    (function () {
+      try {
+        var d = document.documentElement, g = function (k, v) { return localStorage.getItem(k) || v; };
+        var t = g('fx-theme', 'dark');
+        if (t === 'auto') t = window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        d.dataset.theme = t; d.dataset.accent = g('fx-accent', 'orange');
+        d.dataset.density = g('fx-density', 'comfortable'); d.dataset.corners = g('fx-corners', 'rounded');
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute">
@@ -119,6 +131,45 @@
           <label class="switch"><input type="checkbox" id="opt-speaker"><span></span></label></div>
         <div class="setting"><div><b>Data saver</b><p class="muted">Video at 360p on weak mobile data</p></div>
           <label class="switch"><input type="checkbox" id="opt-saver"><span></span></label></div>
+      </div>
+
+      <h3 class="sect">Appearance</h3>
+      <div class="card list-card" id="appearance">
+        <div class="app-block"><b>Theme</b>
+          <div class="seg" data-opt="fx-theme">
+            <button data-v="dark"><i class="theme-dot" style="background:#0b0b0c"></i>Dark</button>
+            <button data-v="light"><i class="theme-dot" style="background:#f3f4f6"></i>Light</button>
+            <button data-v="midnight"><i class="theme-dot" style="background:#000"></i>Midnight</button>
+            <button data-v="slate"><i class="theme-dot" style="background:#151d26"></i>Slate</button>
+            <button data-v="sand"><i class="theme-dot" style="background:#f6f1e9"></i>Sand</button>
+            <button data-v="auto">Auto</button>
+          </div></div>
+        <div class="app-block"><b>Accent colour</b>
+          <div class="swatches" data-opt="fx-accent">
+            <button data-v="orange" style="background:#ff6a13" aria-label="FitX orange"></button>
+            <button data-v="blue" style="background:#2f80ed" aria-label="Blue"></button>
+            <button data-v="green" style="background:#17a957" aria-label="Green"></button>
+            <button data-v="teal" style="background:#0fb5a4" aria-label="Teal"></button>
+            <button data-v="purple" style="background:#8b5cf6" aria-label="Purple"></button>
+            <button data-v="pink" style="background:#ec4899" aria-label="Pink"></button>
+            <button data-v="red" style="background:#e5383b" aria-label="Red"></button>
+            <button data-v="gold" style="background:#f2b200" aria-label="Gold"></button>
+          </div></div>
+        <div class="app-block"><b>Text size</b>
+          <div class="seg" data-opt="fx-text">
+            <button data-v="90">Small</button><button data-v="100">Normal</button><button data-v="115">Large</button><button data-v="130">Extra large</button>
+          </div></div>
+        <div class="app-block"><b>Layout</b>
+          <div class="seg" data-opt="fx-density">
+            <button data-v="comfortable">Comfortable</button><button data-v="compact">Compact</button>
+          </div></div>
+        <div class="app-block"><b>Corners</b>
+          <div class="seg" data-opt="fx-corners">
+            <button data-v="rounded">Rounded</button><button data-v="sharp">Sharp</button><button data-v="extra">Extra round</button>
+          </div>
+          <div class="preview"><div class="msg">Hi! Is the treadmill fixed?</div><div class="msg me">Yes, done ✅</div></div>
+        </div>
+        <div class="app-block"><button class="btn ghost wide" id="look-reset" style="margin:0">Reset to FitX default</button></div>
       </div>
 
       <h3 class="sect native-only">Phone permissions</h3>

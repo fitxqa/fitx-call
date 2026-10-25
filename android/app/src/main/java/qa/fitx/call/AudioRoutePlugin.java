@@ -237,6 +237,35 @@ public class AudioRoutePlugin extends Plugin {
         call.resolve();
     }
 
+    // ---------- appearance ----------
+    @PluginMethod
+    public void setTextZoom(PluginCall call) {
+        int pct = Math.max(80, Math.min(150, call.getInt("percent", 100)));
+        getActivity().runOnUiThread(() -> {
+            try { getBridge().getWebView().getSettings().setTextZoom(pct); } catch (Exception ignored) {}
+            call.resolve();
+        });
+    }
+
+    @PluginMethod
+    public void setSystemBars(PluginCall call) {
+        String color = call.getString("color", "#0b0b0c");
+        boolean light = call.getBoolean("light", false);
+        getActivity().runOnUiThread(() -> {
+            try {
+                android.view.Window w = getActivity().getWindow();
+                int c = android.graphics.Color.parseColor(color);
+                w.setStatusBarColor(c);
+                w.setNavigationBarColor(c);
+                androidx.core.view.WindowInsetsControllerCompat ic = androidx.core.view.WindowCompat.getInsetsController(w, w.getDecorView());
+                ic.setAppearanceLightStatusBars(light);
+                ic.setAppearanceLightNavigationBars(light);
+                getBridge().getWebView().setBackgroundColor(c);
+            } catch (Exception ignored) {}
+            call.resolve();
+        });
+    }
+
     // ---------- app preferences shared with the background service ----------
     @PluginMethod
     public void setPref(PluginCall call) {
