@@ -17,6 +17,7 @@ public final class CallNotifications {
 
     static final String CH_CALLS = "fitx_incoming_calls";
     static final String CH_MISSED = "fitx_missed_calls";
+    static final String CH_MSG = "fitx_messages";
     static final int ID_INCOMING = 7001;
 
     private CallNotifications() {}
@@ -38,6 +39,12 @@ public final class CallNotifications {
             ch.setVibrationPattern(new long[] { 0, 800, 600, 800, 600 });
             ch.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
             ch.setBypassDnd(true);
+            nm.createNotificationChannel(ch);
+        }
+        if (nm.getNotificationChannel(CH_MSG) == null) {
+            NotificationChannel ch = new NotificationChannel(CH_MSG, "Messages", NotificationManager.IMPORTANCE_HIGH);
+            ch.setDescription("New messages from colleagues");
+            ch.enableVibration(true);
             nm.createNotificationChannel(ch);
         }
         if (nm.getNotificationChannel(CH_MISSED) == null) {
@@ -101,6 +108,26 @@ public final class CallNotifications {
             .build();
         NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm != null) nm.notify(7002, n);
+    }
+
+    static void showMessage(Context ctx, String chatId, String fromName, String text) {
+        ensureChannels(ctx);
+        Intent i = new Intent(ctx, MainActivity.class);
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        PendingIntent pi = PendingIntent.getActivity(ctx, 6, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        Notification n = new NotificationCompat.Builder(ctx, CH_MSG)
+            .setSmallIcon(android.R.drawable.sym_action_chat)
+            .setContentTitle(fromName)
+            .setContentText(text)
+            .setStyle(new NotificationCompat.BigTextStyle().bigText(text))
+            .setColor(0xFFFF6A13)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(pi)
+            .build();
+        NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm != null) nm.notify(("m" + chatId).hashCode(), n);
     }
 
     static void cancelClosed(Context ctx) {

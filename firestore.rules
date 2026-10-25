@@ -58,5 +58,37 @@ service cloud.firestore {
           && party(callOf(callId));
       }
     }
+
+    // Chats: one per pair of employees, id = "<uidA>_<uidB>" (sorted). Only the two members can see it.
+    function chatOf(id) { return get(/databases/$(database)/documents/chats/$(id)).data; }
+    function inChat(id) { return request.auth.uid in chatOf(id).members; }
+
+    match /chats/{chatId} {
+      allow read: if active() && request.auth.uid in resource.data.members;
+      allow create: if active()
+        && request.auth.uid in request.resource.data.members
+        && request.resource.data.members.size() == 2
+        && chatId == request.resource.data.members[0] + '_' + request.resource.data.members[1];
+      allow update: if active() && request.auth.uid in resource.data.members
+        && request.resource.data.members == resource.data.members;
+
+      match /messages/{msgId} {
+        allow read: if active() && inChat(chatId);
+        allow create: if active() && inChat(chatId) && request.resource.data.from == request.auth.uid;
+        allow delete: if active() && resource.data.from == request.auth.uid;
+      }
+    }
+
+    // Photos / voice / video, split into ~900 KB parts (free plan has no file Storage).
+    match /media/{mediaId} {
+      allow read: if active() && inChat(resource.data.chatId);
+      allow create: if active() && request.resource.data.owner == request.auth.uid && inChat(request.resource.data.chatId);
+      allow delete: if active() && resource.data.owner == request.auth.uid;
+
+      match /parts/{part} {
+        allow read: if active() && inChat(get(/databases/$(database)/documents/media/$(mediaId)).data.chatId);
+        allow create: if active() && get(/databases/$(database)/documents/media/$(mediaId)).data.owner == request.auth.uid;
+      }
+    }
   }
 }

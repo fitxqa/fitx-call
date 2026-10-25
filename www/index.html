@@ -19,6 +19,14 @@
     <symbol id="i-clock" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 10.4 3.5 2.1-.8 1.3L11 13V7h2z" fill="currentColor"/></symbol>
     <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 1 3 5v6c0 5.5 3.8 10.7 9 12 5.2-1.3 9-6.5 9-12V5zm-1 15-4-4 1.4-1.4L11 13.2l5.6-5.6L18 9z" fill="currentColor"/></symbol>
     <symbol id="i-gear" viewBox="0 0 24 24"><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3h-4l-.4 2.7a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1c.5.4 1.1.7 1.7 1L11 21h4l.4-2.7c.6-.3 1.2-.6 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" fill="currentColor"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 3h16a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 1-2z" fill="currentColor"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M2 21 23 12 2 3v7l15 2-15 2z" fill="currentColor"/></symbol>
+    <symbol id="i-clip" viewBox="0 0 24 24"><path d="M16.5 6.5v10a4.5 4.5 0 0 1-9 0V5a3 3 0 0 1 6 0v10.5a1.5 1.5 0 0 1-3 0V6.5H9v9a3 3 0 0 0 6 0V5a4.5 4.5 0 0 0-9 0v11.5a6 6 0 0 0 12 0v-10z" fill="currentColor"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20z" fill="currentColor"/></symbol>
+    <symbol id="i-img" viewBox="0 0 24 24"><path d="M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2zM8.5 13.5l2.5 3 3.5-4.5 4.5 6H5z" fill="currentColor"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="currentColor"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M6 5h4v14H6zm8 0h4v14h-4z" fill="currentColor"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6zM19 4h-3.5l-1-1h-5l-1 1H5v2h14z" fill="currentColor"/></symbol>
   </svg>
 
   <!-- Loading -->
@@ -68,6 +76,10 @@
       <ul id="contacts" class="list"></ul>
     </div>
 
+    <div id="tab-chats" class="tab hidden">
+      <ul id="chats" class="list"></ul>
+    </div>
+
     <div id="tab-recents" class="tab hidden">
       <ul id="recents" class="list"></ul>
     </div>
@@ -114,11 +126,45 @@
 
     <nav class="tabs">
       <button data-tab="contacts" class="on"><svg><use href="#i-users"/></svg>Team</button>
+      <button data-tab="chats"><svg><use href="#i-chat"/></svg>Chats<i id="chat-badge" class="nbadge hidden"></i></button>
       <button data-tab="recents"><svg><use href="#i-clock"/></svg>Recents</button>
       <button data-tab="admin" id="nav-admin" class="hidden"><svg><use href="#i-shield"/></svg>Admin</button>
       <button data-tab="settings"><svg><use href="#i-gear"/></svg>Settings</button>
     </nav>
   </section>
+
+  <!-- Chat -->
+  <section id="s-chat" class="screen hidden">
+    <header class="chat-top">
+      <button class="icon-btn plain" id="chat-back" aria-label="Back"><svg><use href="#i-back"/></svg></button>
+      <div class="avatar sm" id="chat-avatar"></div>
+      <div class="who"><b id="chat-name"></b><small id="chat-sub"></small></div>
+      <button class="icon-btn plain" id="chat-voice" aria-label="Voice call"><svg><use href="#i-phone"/></svg></button>
+      <button class="icon-btn plain" id="chat-video" aria-label="Video call"><svg><use href="#i-video"/></svg></button>
+    </header>
+    <div id="msgs" class="msgs"></div>
+    <div id="rec-bar" class="rec-bar hidden">
+      <span class="rec-dot"></span><span id="rec-time">0:00</span><span class="muted">Recording voice message…</span>
+      <button class="icon-btn plain" id="rec-cancel" aria-label="Cancel"><svg><use href="#i-trash"/></svg></button>
+      <button class="icon-btn" id="rec-send" aria-label="Send"><svg><use href="#i-send"/></svg></button>
+    </div>
+    <div id="attach-menu" class="attach-menu hidden">
+      <button data-pick="image/*" data-cap=""><svg><use href="#i-img"/></svg>Photo</button>
+      <button data-pick="image/*" data-cap="environment"><svg><use href="#i-cam"/></svg>Camera</button>
+      <button data-pick="video/*" data-cap=""><svg><use href="#i-video"/></svg>Video</button>
+      <button data-pick="video/*" data-cap="environment"><svg><use href="#i-video"/></svg>Record video</button>
+    </div>
+    <form id="composer" class="composer">
+      <button type="button" class="icon-btn plain" id="attach-btn" aria-label="Attach"><svg><use href="#i-clip"/></svg></button>
+      <input id="msg-input" placeholder="Message" autocomplete="off">
+      <button type="button" class="icon-btn" id="mic-btn" aria-label="Voice message"><svg><use href="#i-mic"/></svg></button>
+      <button type="submit" class="icon-btn hidden" id="send-btn" aria-label="Send"><svg><use href="#i-send"/></svg></button>
+    </form>
+    <input type="file" id="file-pick" class="hidden">
+  </section>
+
+  <!-- Media viewer -->
+  <div id="viewer" class="viewer hidden"><button id="viewer-close" class="icon-btn plain">✕</button><div id="viewer-body"></div></div>
 
   <!-- Incoming call -->
   <section id="s-incoming" class="screen call hidden">

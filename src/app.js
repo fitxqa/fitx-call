@@ -12,6 +12,7 @@ import {
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { CallSession } from './call.js';
+import { createChat } from './chat.js';
 
 const CFG = window.FITX_CONFIG || {};
 const $ = (id) => document.getElementById(id);
@@ -20,7 +21,7 @@ const Native = registerPlugin('AudioRoute');
 const VERSION = '1.1';
 
 // ---------- UI helpers ----------
-const screens = ['s-loading', 's-setup', 's-login', 's-main', 's-incoming', 's-call'];
+const screens = ['s-loading', 's-setup', 's-login', 's-main', 's-chat', 's-incoming', 's-call'];
 function show(id) { screens.forEach((s) => $(s).classList.toggle('hidden', s !== id)); }
 let toastT;
 function toast(msg, ms = 2600) {
@@ -114,6 +115,12 @@ let unsubs = [];
 let heartbeat = null;
 let callTimer = null;
 let inBackground = false;
+
+const chat = createChat({
+  getDb: () => db, getMe: () => me, getUsers: () => users, toast, show, native, Native, esc, initials, ago, $,
+  startCall: (peer, type) => startCall(peer, type),
+});
+const homeScreen = () => (chat.isOpenAny() ? 's-chat' : 's-main');
 
 // ---------- Auth ----------
 async function emailFor(username) {
@@ -261,6 +268,7 @@ async function onLogin(user) {
     me = { uid: user.uid, ...s.data() }; renderMe();
   }, () => {}));
   watchTeam();
+  chat.start();
   watchIncoming();
   watchRecents();
   if (me.role === 'admin') watchAdmin();
@@ -279,6 +287,7 @@ function renderMe() {
 
 function onLogout() {
   unsubs.forEach((u) => u()); unsubs = [];
+  chat.stop();
   clearInterval(heartbeat);
   me = null; users = [];
   if (current) current.finish('');
@@ -332,6 +341,7 @@ function renderTeam() {
     <li>
       <div class="avatar ${isOnline(u) ? 'on' : ''}">${esc(initials(u.name))}</div>
       <div class="who"><b>${esc(u.name)}</b><small>${esc(u.department || '@' + u.username)}${isOnline(u) ? ' · online' : ''}</small></div>
+      <button class="icon-btn" data-chat="${u.uid}" aria-label="Message"><svg><use href="#i-chat"/></svg></button>
       <button class="icon-btn" data-call="${u.uid}" data-type="audio" aria-label="Voice call"><svg><use href="#i-phone"/></svg></button>
       <button class="icon-btn" data-call="${u.uid}" data-type="video" aria-label="Video call"><svg><use href="#i-video"/></svg></button>
     </li>`).join('') : `<li class="empty">${q ? 'No match' : 'No other employees yet'}</li>`;
@@ -340,6 +350,8 @@ $('search').addEventListener('input', renderTeam);
 setInterval(() => { if (me && !$('tab-contacts').classList.contains('hidden')) renderTeam(); }, 60000);
 
 document.addEventListener('click', (e) => {
+  const c = e.target.closest('[data-chat]');
+  if (c) { const u = users.find((x) => x.uid === c.dataset.chat); if (u) chat.openWith(u); return; }
   const b = e.target.closest('[data-call]');
   if (!b) return;
   const u = users.find((x) => x.uid === b.dataset.call) || recentPeers[b.dataset.call];
@@ -381,7 +393,7 @@ function logFinal(s) {
 // ---------- Tabs ----------
 document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => {
   document.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('on', x === b));
-  ['contacts', 'recents', 'admin', 'settings'].forEach((t) => $('tab-' + t).classList.toggle('hidden', t !== b.dataset.tab));
+  ['contacts', 'chats', 'recents', 'admin', 'settings'].forEach((t) => $('tab-' + t).classList.toggle('hidden', t !== b.dataset.tab));
   if (b.dataset.tab === 'settings') refreshChecks();
 }));
 $('opt-saver').checked = saverOn();
@@ -499,12 +511,26 @@ function hooks() {
       Tone.stop();
       current.startedAt = Date.now();
       startTimerLabel();
-      if (current.type === 'video') $('s-call').classList.add('video-on');
+      if (current.type === 'video') { $('s-call').classList.add('video-on'); armHide(); }
     },
     onQuality: (q) => { $('c-quality').textContent = q; },
     onEnded: (why) => endUi(why),
   };
 }
+
+// Video calls: hide the buttons after 4 s; tap the screen to bring them back.
+let hideT = null;
+function armHide() {
+  clearTimeout(hideT);
+  $('s-call').classList.remove('controls-hidden');
+  if ($('s-call').classList.contains('video-on')) hideT = setTimeout(() => $('s-call').classList.add('controls-hidden'), 4000);
+}
+$('s-call').addEventListener('click', (e) => {
+  if (!$('s-call').classList.contains('video-on')) return;
+  if (e.target.closest('button')) { armHide(); return; }
+  if ($('s-call').classList.contains('controls-hidden')) armHide();
+  else { clearTimeout(hideT); $('s-call').classList.add('controls-hidden'); }
+});
 
 function startTimerLabel() {
   clearInterval(callTimer);
@@ -519,7 +545,7 @@ function openCallUi(peerName, type) {
   $('c-name').textContent = peerName; $('c-avatar').textContent = initials(peerName);
   $('c-quality').textContent = '';
   $('s-call').classList.toggle('is-video', type === 'video');
-  $('s-call').classList.remove('video-on');
+  $('s-call').classList.remove('video-on', 'controls-hidden'); clearTimeout(hideT);
   $('local-video').classList.remove('back');
   show('s-call');
   if (native) Native.startCall({ video: type === 'video' }).catch(() => {});
@@ -556,7 +582,7 @@ function endUi(why) {
   current = null;
   logFinal(s);
   if (why) toast(why);
-  show(me ? 's-main' : 's-login');
+  show(me ? homeScreen() : 's-login');
 }
 
 $('b-end').addEventListener('click', () => current?.hangup());
@@ -588,7 +614,7 @@ function watchIncoming() {
         if (!incoming.accepting) {
           Tone.stop(); incoming = null;
           if (native) { Native.cancelIncoming().catch(() => {}); Native.showMissed({ callId: id, fromName: d.fromName, callType: d.type }).catch(() => {}); }
-          toast(`Missed call from ${d.fromName}`); show('s-main');
+          toast(`Missed call from ${d.fromName}`); show(homeScreen());
         }
       }
     });
@@ -636,7 +662,7 @@ async function declineIncoming() {
   if (native) Native.cancelIncoming().catch(() => {});
   const ref = doc(db, 'calls', incoming.id);
   incoming = null;
-  show('s-main');
+  show(homeScreen());
   await updateDoc(ref, { status: 'declined', endedAt: serverTimestamp(), endedBy: me.uid }).catch(() => {});
 }
 $('in-accept').addEventListener('click', acceptIncoming);
@@ -658,6 +684,8 @@ if (native) {
   App.getLaunchUrl().then((r) => r && handleLink(r.url)).catch(() => {});
   App.addListener('backButton', () => {
     if (current || incoming) return; // never leave a call by accident
+    if (chat.viewerOpen()) return chat.closeViewer();
+    if (chat.isOpen()) return chat.close();
     const onTeam = !$('tab-contacts').classList.contains('hidden');
     if (!onTeam) document.querySelector('.tabs button[data-tab="contacts"]').click();
     else App.minimizeApp();
@@ -665,7 +693,7 @@ if (native) {
   App.addListener('appStateChange', ({ isActive }) => {
     inBackground = !isActive;
     if (isActive) {
-      ping(); refreshChecks();
+      ping(); refreshChecks(); chat.resume();
       if (incoming && !current) { Native.cancelIncoming().catch(() => {}); if (!Tone.timer) Tone.ring(); }
     }
   });

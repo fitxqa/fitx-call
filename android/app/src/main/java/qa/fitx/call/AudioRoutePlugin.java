@@ -136,6 +136,14 @@ public class AudioRoutePlugin extends Plugin {
     }
 
     @PluginMethod
+    public void showMessage(PluginCall call) {
+        if (!MainActivity.inForeground) {
+            CallNotifications.showMessage(getContext(), call.getString("chatId", "x"), call.getString("fromName", "FitX"), call.getString("text", "New message"));
+        }
+        call.resolve();
+    }
+
+    @PluginMethod
     public void isForeground(PluginCall call) {
         JSObject r = new JSObject();
         r.put("value", MainActivity.inForeground);
