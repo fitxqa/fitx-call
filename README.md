@@ -29,6 +29,15 @@ listens natively — no paid server push needed. Calls on mobile data go through
 `www/firebase-config.js`. Media in chats is stored in Firestore (free plan has no file Storage): photos are
 compressed, videos ≤ 8 MB, voice ≤ 3 min, and media auto-deletes after 30 days.
 
+## Dial pad (SIP + phone)
+
+- **Keypad tab**: type a number, then **SIP** (calls through your PBX / VoIP provider) or **Phone** (normal SIM call via
+  the phone's dialer; *Settings → Phone calls: call directly* skips the dialer screen). Long-press 0 for **+**.
+- **SIP account** (Settings → Dial pad & SIP): username/extension, password, domain and **WebSocket URL (WSS)**.
+  The PBX must support WebRTC / SIP over WSS (Asterisk/FreePBX `wss://host:8089/ws`, FreeSWITCH `wss://host:7443`,
+  3CX, Yeastar, Kamailio, Zadarma, Telnyx…). Incoming SIP calls ring while the app is open or in the background.
+- In a SIP call, **Keypad** sends DTMF tones (IVR menus). SIP and phone calls appear in Recents with redial.
+
 ## How it works
 - **WebRTC** peer-to-peer, encrypted (DTLS-SRTP). Voice/video never pass through Firebase.
 - **Firestore** = call signaling, employee directory, per-user call history, protected by `firestore.rules`.

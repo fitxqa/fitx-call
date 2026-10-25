@@ -237,6 +237,26 @@ public class AudioRoutePlugin extends Plugin {
         call.resolve();
     }
 
+    // ---------- phone (SIM) dialer ----------
+    @PluginMethod
+    public void dialPhone(PluginCall call) {
+        String num = call.getString("number", "");
+        boolean direct = call.getBoolean("direct", false);
+        boolean can = direct && androidx.core.content.ContextCompat.checkSelfPermission(getContext(), android.Manifest.permission.CALL_PHONE)
+            == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        if (direct && !can) {
+            androidx.core.app.ActivityCompat.requestPermissions(getActivity(), new String[] { android.Manifest.permission.CALL_PHONE }, 502);
+        }
+        try {
+            Intent i = new Intent(can ? Intent.ACTION_CALL : Intent.ACTION_DIAL, Uri.parse("tel:" + Uri.encode(num)));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(i);
+            JSObject r = new JSObject();
+            r.put("direct", can);
+            call.resolve(r);
+        } catch (Exception e) { call.reject("No phone app on this device"); }
+    }
+
     // ---------- appearance ----------
     @PluginMethod
     public void setTextZoom(PluginCall call) {

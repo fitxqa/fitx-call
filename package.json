@@ -10,7 +10,8 @@
     "@capacitor/android": "^8.5.3",
     "@capacitor/app": "^8.1.2",
     "@capacitor/core": "^8.5.3",
-    "firebase": "^13.1.0"
+    "firebase": "^13.1.0",
+    "jssip": "3.13.8"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.3",

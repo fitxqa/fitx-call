@@ -231,3 +231,41 @@ html[data-corners="extra"] .btn, html[data-corners="extra"] input, html[data-cor
 
 /* Brand logo X always stays FitX orange */
 .logo b { color: #ff6a13 !important; }
+
+/* ================= Dial pad ================= */
+#tab-keypad { display: flex; }
+#tab-keypad.hidden { display: none !important; }
+.dp { flex: 1; display: flex; flex-direction: column; align-items: center; max-width: 380px; margin: 0 auto; width: 100%; }
+.dp-status { align-self: center; display: inline-flex; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--line); color: var(--muted); border-radius: 99px; padding: 6px 12px; font-size: 12px; margin: 4px 0 6px; }
+.dp-status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.dp-status.registered .dot { background: var(--green); } .dp-status.registered { color: var(--text); }
+.dp-status.connecting .dot { background: var(--orange); animation: blink 1s infinite; }
+.dp-status.error .dot { background: var(--red); }
+@keyframes blink { 50% { opacity: .3; } }
+.dp-num { width: 100%; display: flex; align-items: center; gap: 6px; padding: 10px 4px 14px; }
+.dp-num input { flex: 1; background: none; border: 0; text-align: center; font-size: 34px; font-weight: 600; letter-spacing: 1px; color: var(--text); padding: 4px 0 4px 48px; }
+.dp-num input::placeholder { font-size: 18px; font-weight: 400; letter-spacing: 0; color: var(--muted); }
+.icon-btn.plain { background: none; color: var(--muted); }
+.dp-grid { width: 100%; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px 18px; padding: 0 18px; }
+.dp-grid button { aspect-ratio: 1.35; max-height: 74px; border: 0; border-radius: 999px; background: var(--panel2); color: var(--text); display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; user-select: none; }
+.dp-grid button b { font-size: 28px; font-weight: 500; }
+.dp-grid button small { font-size: 10px; letter-spacing: 1.5px; color: var(--muted); margin-top: 3px; }
+.dp-grid button:active { background: var(--accent-soft); }
+.dp-actions { display: flex; gap: 22px; justify-content: center; padding: 18px 0 10px; }
+.dp-call { width: 68px; height: 68px; border-radius: 50%; border: 0; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 10px; font-weight: 700; letter-spacing: .5px; }
+.dp-call svg { width: 26px; height: 26px; }
+.dp-call.sip { background: var(--green); }
+.dp-call.gsm { background: #2f80ed; }
+.dp-call:active { transform: scale(.95); }
+html[data-density="compact"] .dp-grid { gap: 8px 14px; }
+/* SIP settings */
+.sip-fields { max-width: none; gap: 10px; }
+.sip-fields details label { margin-top: 10px; }
+.sip-fields summary { cursor: pointer; padding: 4px 0; }
+/* In-call keypad */
+.call:not(.is-sip) .sip-only { display: none; }
+.dtmf { position: fixed; inset: 0; z-index: 60; display: flex; align-items: flex-end; justify-content: center; background: rgba(0,0,0,.45); }
+.dtmf-box { width: 100%; max-width: 420px; background: #141416; border-radius: 22px 22px 0 0; padding: 14px 0 calc(14px + var(--safe-b)); color: #f4f4f5; }
+.dtmf-box .dp-grid button { background: #232327; color: #f4f4f5; }
+.dtmf-show { text-align: center; font-size: 28px; min-height: 40px; letter-spacing: 2px; margin-bottom: 8px; }
+.dtmf-box .btn { margin: 12px auto 0; width: calc(100% - 36px); display: block; color: #f4f4f5; border-color: #333; }

@@ -13,6 +13,7 @@ import { Capacitor, registerPlugin } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { CallSession } from './call.js';
 import { createChat } from './chat.js';
+import { SipPhone, loadSip, saveSip } from './sip.js';
 
 const CFG = window.FITX_CONFIG || {};
 const $ = (id) => document.getElementById(id);
@@ -289,6 +290,7 @@ async function onLogin(user) {
   }, () => {}));
   watchTeam();
   chat.start();
+  sip.start();
   watchIncoming();
   watchRecents();
   if (me.role === 'admin') watchAdmin();
@@ -315,6 +317,7 @@ function renderMe() {
 function onLogout() {
   unsubs.forEach((u) => u()); unsubs = [];
   chat.stop();
+  sip.stop();
   clearInterval(heartbeat);
   me = null; users = [];
   if (current) current.finish('');
@@ -480,6 +483,8 @@ setInterval(() => { if (me && !$('tab-contacts').classList.contains('hidden')) r
 document.addEventListener('click', (e) => {
   const c = e.target.closest('[data-chat]');
   if (c) { const u = users.find((x) => x.uid === c.dataset.chat); if (u) chat.openWith(u); return; }
+  const dl = e.target.closest('[data-dial]');
+  if (dl) { if (dl.dataset.route === 'gsm') dialGsm(dl.dataset.dial); else dialSip(dl.dataset.dial); return; }
   const b = e.target.closest('[data-call]');
   if (!b) return;
   const u = users.find((x) => x.uid === b.dataset.call) || recentPeers[b.dataset.call];
@@ -495,6 +500,17 @@ function watchRecents() {
 function renderRecents(all) {
   $('recents').innerHTML = all.length ? all.map((c) => {
     const out = c.dir === 'out';
+    if (c.type === 'sip' || c.type === 'phone') {
+      const num = c.number || String(c.peerUid || '').replace(/^tel:/, '');
+      const miss = !out && ['missed', 'cancelled'].includes(c.status);
+      const lbl = c.type === 'phone' ? 'Phone call' : miss ? 'Missed SIP call' : c.status === 'declined' ? 'Declined SIP call' : 'SIP call';
+      const route = c.type === 'phone' ? 'gsm' : 'sip';
+      return `<li>
+        <div class="avatar">#</div>
+        <div class="who"><b>${esc(c.peerName || num)}</b><small class="dir ${miss ? 'missed' : ''}">${out ? '↗' : '↙'} ${lbl}${c.duration ? ' · ' + fmtDur(c.duration) : ''} · ${ago(c.createdAtMs)}</small></div>
+        <button class="icon-btn" data-dial="${esc(num)}" data-route="${route}"><svg><use href="#i-${route === 'gsm' ? 'sim' : 'phone'}"/></svg></button>
+      </li>`;
+    }
     recentPeers[c.peerUid] = { uid: c.peerUid, name: c.peerName };
     const missed = !out && ['missed', 'cancelled', 'ringing'].includes(c.status);
     const dur = c.duration ? fmtDur(c.duration) : '';
@@ -512,6 +528,11 @@ function writeLog(ownerUid, callId, data) {
 }
 function logFinal(s) {
   if (!s || !me) return;
+  if (s.kind === 'sip') {
+    const duration = s.startedAt ? Math.max(0, Math.round(((s.endedAt || Date.now()) - s.startedAt) / 1000)) : 0;
+    writeLog(me.uid, s.id, { peerUid: 'tel:' + s.number, peerName: s.peer.name, number: s.number, dir: s.role === 'caller' ? 'out' : 'in', type: 'sip', status: s.finalStatus || 'ended', duration, createdAtMs: s.createdAtMs });
+    return;
+  }
   const duration = s.startedAt ? Math.max(0, Math.round(((s.endedAt || Date.now()) - s.startedAt) / 1000)) : 0;
   const upd = { status: s.finalStatus || 'ended', duration };
   writeLog(me.uid, s.id, upd);
@@ -521,7 +542,7 @@ function logFinal(s) {
 // ---------- Tabs ----------
 document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => {
   document.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('on', x === b));
-  ['contacts', 'chats', 'recents', 'admin', 'settings'].forEach((t) => $('tab-' + t).classList.toggle('hidden', t !== b.dataset.tab));
+  ['contacts', 'chats', 'keypad', 'recents', 'admin', 'settings'].forEach((t) => $('tab-' + t).classList.toggle('hidden', t !== b.dataset.tab));
   if (b.dataset.tab === 'settings') refreshChecks();
 }));
 
@@ -673,7 +694,7 @@ function openCallUi(peerName, type) {
   $('c-name').textContent = peerName; $('c-avatar').textContent = initials(peerName);
   $('c-quality').textContent = '';
   $('s-call').classList.toggle('is-video', type === 'video');
-  $('s-call').classList.remove('video-on', 'controls-hidden'); clearTimeout(hideT);
+  $('s-call').classList.remove('video-on', 'controls-hidden', 'is-sip'); clearTimeout(hideT);
   $('local-video').classList.remove('back');
   show('s-call');
   if (native) Native.startCall({ video: type === 'video' }).catch(() => {});
@@ -708,6 +729,7 @@ function endUi(why) {
   if (native) Native.endCall().catch(() => {});
   $('remote-video').srcObject = null; $('remote-audio').srcObject = null; $('local-video').srcObject = null;
   current = null;
+  $('dtmf').classList.add('hidden'); $('s-call').classList.remove('is-sip');
   logFinal(s);
   if (why) toast(why);
   show(me ? homeScreen() : 's-login');
@@ -721,6 +743,169 @@ $('b-flip').addEventListener('click', async () => {
   try { const f = await current?.flipCamera(); $('local-video').srcObject = current.local; $('local-video').classList.toggle('back', f === 'environment'); }
   catch (e) { toast('Could not switch camera'); }
 });
+
+// ---------- Dial pad: SIP + phone (SIM) dialer ----------
+let sipIncoming = null;
+const sip = new SipPhone({
+  isBusy: () => !!current || !!incoming || !!sipIncoming,
+  onStatus: (state, text) => {
+    $('dp-status').className = 'dp-status ' + state;
+    $('sip-state').textContent = state === 'off' && !loadSip().user ? 'SIP not set up — tap to set up' : text;
+    $('sip-status-text').textContent = text;
+  },
+  onIncoming: (call) => {
+    sipIncoming = call;
+    call.hooks = {
+      onEnded: () => {
+        if (sipIncoming !== call) return;
+        sipIncoming = null; Tone.stop();
+        if (native) { Native.cancelIncoming().catch(() => {}); Native.showMissed({ callId: call.id, fromName: call.peer.name, callType: 'audio' }).catch(() => {}); }
+        toast(`Missed SIP call from ${call.peer.name}`);
+        logFinal(call);
+        show(homeScreen());
+      },
+    };
+    $('in-name').textContent = call.peer.name;
+    $('in-avatar').textContent = '#';
+    $('in-type').textContent = 'Incoming SIP call';
+    show('s-incoming');
+    (native ? Native.ringIncoming({ callId: call.id, fromName: call.peer.name, callType: 'audio' }).then((r) => r.shown) : Promise.resolve(false))
+      .catch(() => false).then((shown) => { if (!shown && sipIncoming === call) Tone.ring(); });
+  },
+});
+
+async function acceptSip() {
+  const call = sipIncoming; if (!call) return;
+  sipIncoming = null;
+  Tone.stop(); if (native) Native.cancelIncoming().catch(() => {});
+  current = call;
+  call.hooks = hooks();
+  openCallUi(call.peer.name, 'audio');
+  $('s-call').classList.add('is-sip');
+  $('c-avatar').textContent = '#';
+  $('c-status').textContent = 'Connecting…';
+  try { await call.answer(); } catch (e) { call.finish('Could not answer'); }
+}
+function declineSip() {
+  const call = sipIncoming; if (!call) return;
+  sipIncoming = null; Tone.stop(); if (native) Native.cancelIncoming().catch(() => {});
+  call.hooks = {}; call.decline(); logFinal(call); show(homeScreen());
+}
+
+const cleanNum = (v) => String(v || '').replace(/[^\d+*#]/g, '');
+async function dialSip(number) {
+  const num = cleanNum(number);
+  if (!num) return toast('Enter a number');
+  if (current) return toast('Already in a call');
+  if (!sip.ready()) {
+    toast(loadSip().user ? 'SIP is not connected yet — check Settings' : 'Set up your SIP account in Settings first', 3500);
+    return;
+  }
+  let call;
+  try { call = await sip.call(num); } catch (e) { return toast(e.message || 'Could not call'); }
+  current = call;
+  call.hooks = hooks();
+  openCallUi(num, 'audio');
+  $('s-call').classList.add('is-sip');
+  $('c-avatar').textContent = '#';
+  $('c-status').textContent = 'Calling…';
+  Tone.ringback();
+}
+async function dialGsm(number) {
+  const num = cleanNum(number);
+  if (!num) return toast('Enter a number');
+  if (native) {
+    try { await Native.dialPhone({ number: num, direct: pref('directDial', false) }); }
+    catch (e) { return toast('No phone app on this device'); }
+  } else location.href = 'tel:' + num;
+  if (me) writeLog(me.uid, 'gsm-' + Date.now().toString(36), { peerUid: 'tel:' + num, peerName: num, number: num, dir: 'out', type: 'phone', status: 'dialed', createdAtMs: Date.now() });
+}
+
+// Keypad
+const DTMF = { 1: [697, 1209], 2: [697, 1336], 3: [697, 1477], 4: [770, 1209], 5: [770, 1336], 6: [770, 1477], 7: [852, 1209], 8: [852, 1336], 9: [852, 1477], '*': [941, 1209], 0: [941, 1336], '#': [941, 1477] };
+const keyTone = (k) => { try { Tone._beep(DTMF[k] || [941, 1336], 0.12, 0.06); } catch (e) {} if (navigator.vibrate) navigator.vibrate(12); };
+const dpIn = $('dp-input');
+function dpSet(v) { dpIn.value = v; }
+let pressT = null, longDone = false;
+$('dp-grid').addEventListener('pointerdown', (e) => {
+  const b = e.target.closest('[data-k]'); if (!b) return;
+  longDone = false;
+  if (b.dataset.k === '0') pressT = setTimeout(() => { longDone = true; dpSet(dpIn.value + '+'); if (navigator.vibrate) navigator.vibrate(25); }, 550);
+});
+['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => $('dp-grid').addEventListener(ev, () => clearTimeout(pressT)));
+$('dp-grid').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-k]'); if (!b) return;
+  if (longDone) { longDone = false; return; }
+  keyTone(b.dataset.k);
+  dpSet(dpIn.value + b.dataset.k);
+});
+let backT = null;
+$('dp-back').addEventListener('click', () => dpSet(dpIn.value.slice(0, -1)));
+$('dp-back').addEventListener('pointerdown', () => { backT = setTimeout(() => dpSet(''), 600); });
+['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => $('dp-back').addEventListener(ev, () => clearTimeout(backT)));
+dpIn.addEventListener('input', () => { const c = cleanNum(dpIn.value); if (c !== dpIn.value) dpIn.value = c; });
+$('dp-sip').addEventListener('click', () => dialSip(dpIn.value));
+$('dp-gsm').addEventListener('click', () => dialGsm(dpIn.value));
+$('dp-status').addEventListener('click', () => {
+  document.querySelector('.tabs button[data-tab="settings"]').click();
+  setTimeout(() => $('sip-card').scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+});
+function applyRoute() {
+  const r = (() => { try { return localStorage.getItem('fx-route') || 'both'; } catch (e) { return 'both'; } })();
+  $('dp-sip').classList.toggle('hidden', r === 'gsm');
+  $('dp-gsm').classList.toggle('hidden', r === 'sip');
+  document.querySelectorAll('[data-route] [data-v]').forEach((b) => b.classList.toggle('on', b.dataset.v === r));
+}
+document.querySelector('[data-route]').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-v]'); if (!b) return;
+  try { localStorage.setItem('fx-route', b.dataset.v); } catch (x) {}
+  applyRoute();
+});
+applyRoute();
+
+// In-call keypad (DTMF) for SIP calls: "press 1 for sales…"
+$('b-keys').addEventListener('click', (e) => { e.stopPropagation(); $('dtmf-show').textContent = ''; $('dtmf').classList.remove('hidden'); });
+$('dtmf-close').addEventListener('click', () => $('dtmf').classList.add('hidden'));
+$('dtmf-grid').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-k]'); if (!b || !current || current.kind !== 'sip') return;
+  keyTone(b.dataset.k);
+  current.sendDTMF(b.dataset.k);
+  $('dtmf-show').textContent = ($('dtmf-show').textContent + b.dataset.k).slice(-16);
+});
+
+// SIP settings
+const SIP_FIELDS = { user: 'sip-user', password: 'sip-pass', domain: 'sip-domain', wss: 'sip-wss', name: 'sip-name', authUser: 'sip-auth', prefix: 'sip-prefix' };
+function fillSipForm() {
+  const c = loadSip();
+  Object.entries(SIP_FIELDS).forEach(([k, id]) => { $(id).value = c[k] || ''; });
+  $('sip-enabled').checked = !!c.enabled;
+  $('opt-direct').checked = pref('directDial', false);
+}
+function readSipForm() {
+  const c = loadSip();
+  Object.entries(SIP_FIELDS).forEach(([k, id]) => { c[k] = $(id).value.trim(); });
+  if (c.domain && !c.wss) c.wss = `wss://${c.domain}:8089/ws`;
+  return c;
+}
+$('sip-save').addEventListener('click', () => {
+  const c = readSipForm();
+  if (!c.user || !c.domain || !c.password) return toast('Fill in username, password and domain', 3500);
+  c.enabled = true;
+  saveSip(c); fillSipForm();
+  sip.start(c);
+  toast('Connecting to SIP…');
+});
+$('sip-enabled').addEventListener('change', (e) => {
+  const c = readSipForm();
+  c.enabled = e.target.checked;
+  saveSip(c);
+  if (c.enabled) {
+    if (!c.user || !c.domain || !c.password) { toast('Fill in your SIP details below, then tap Save & connect', 3500); $('sip-user').focus(); }
+    sip.start(c);
+  } else sip.stop();
+});
+$('opt-direct').addEventListener('change', (e) => setPref('directDial', e.target.checked));
+fillSipForm();
 
 // ---------- Incoming ----------
 function watchIncoming() {
@@ -793,8 +978,8 @@ async function declineIncoming() {
   show(homeScreen());
   await updateDoc(ref, { status: 'declined', endedAt: serverTimestamp(), endedBy: me.uid }).catch(() => {});
 }
-$('in-accept').addEventListener('click', acceptIncoming);
-$('in-decline').addEventListener('click', declineIncoming);
+$('in-accept').addEventListener('click', () => (sipIncoming ? acceptSip() : acceptIncoming()));
+$('in-decline').addEventListener('click', () => (sipIncoming ? declineSip() : declineIncoming()));
 
 // ---------- Notification taps: fitxcall://call?id=...&action=answer|decline|open ----------
 function handleLink(url) {
@@ -802,6 +987,10 @@ function handleLink(url) {
   const u = new URL(url.replace('fitxcall://', 'https://x/'));
   const id = u.searchParams.get('id'); const action = u.searchParams.get('action') || 'open';
   if (!id) return;
+  if (sipIncoming && sipIncoming.id === id) {
+    if (action === 'answer') acceptSip(); else if (action === 'decline') declineSip();
+    return;
+  }
   if (incoming && incoming.id === id) {
     if (action === 'answer') acceptIncoming();
     else if (action === 'decline') declineIncoming();
@@ -811,7 +1000,8 @@ if (native) {
   App.addListener('appUrlOpen', (e) => handleLink(e.url));
   App.getLaunchUrl().then((r) => r && handleLink(r.url)).catch(() => {});
   App.addListener('backButton', () => {
-    if (current || incoming) return; // never leave a call by accident
+    if (current || incoming || sipIncoming) return; // never leave a call by accident
+    if (!$('dtmf').classList.contains('hidden')) { $('dtmf').classList.add('hidden'); return; }
     if (chat.viewerOpen()) return chat.closeViewer();
     if (chat.isOpen()) return chat.close();
     const onTeam = !$('tab-contacts').classList.contains('hidden');
@@ -822,7 +1012,7 @@ if (native) {
     inBackground = !isActive;
     if (isActive) {
       ping(); refreshChecks(); chat.resume();
-      if (incoming && !current) { Native.cancelIncoming().catch(() => {}); if (!Tone.timer) Tone.ring(); }
+      if ((incoming || sipIncoming) && !current) { Native.cancelIncoming().catch(() => {}); if (!Tone.timer) Tone.ring(); }
     }
   });
 }

@@ -38,6 +38,9 @@
     <symbol id="i-img" viewBox="0 0 24 24"><path d="M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2zM8.5 13.5l2.5 3 3.5-4.5 4.5 6H5z" fill="currentColor"/></symbol>
     <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="currentColor"/></symbol>
     <symbol id="i-pause" viewBox="0 0 24 24"><path d="M6 5h4v14H6zm8 0h4v14h-4z" fill="currentColor"/></symbol>
+    <symbol id="i-dialpad" viewBox="0 0 24 24"><path d="M12 19a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM6 1a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm0 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm0 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm12-8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm-6 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm0-6a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm-6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm0-6a2 2 0 1 0 0 4 2 2 0 0 0 0-4z" fill="currentColor"/></symbol>
+    <symbol id="i-sim" viewBox="0 0 24 24"><path d="M18 2h-8L4 8v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zM9 19H7v-2h2zm8 0h-2v-2h2zm-4 0h-2v-4h2zm-4-4H7v-4h2zm4 0h-2v-2h2zm4 0h-2v-4h2z" fill="currentColor"/></symbol>
+    <symbol id="i-backspace" viewBox="0 0 24 24"><path d="M22 3H7c-.7 0-1.2.3-1.6.9L0 12l5.4 8.1c.4.5.9.9 1.6.9h15a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-3 12.6L17.6 17 14 13.4 10.4 17 9 15.6 12.6 12 9 8.4 10.4 7 14 10.6 17.6 7 19 8.4 15.4 12z" fill="currentColor"/></symbol>
     <symbol id="i-trash" viewBox="0 0 24 24"><path d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6zM19 4h-3.5l-1-1h-5l-1 1H5v2h14z" fill="currentColor"/></symbol>
   </svg>
 
@@ -92,6 +95,26 @@
       <ul id="chats" class="list"></ul>
     </div>
 
+    <div id="tab-keypad" class="tab hidden">
+      <div class="dp">
+        <button class="dp-status" id="dp-status" type="button"><i class="dot" id="sip-dot"></i><span id="sip-state">SIP not set up</span></button>
+        <div class="dp-num">
+          <input id="dp-input" type="tel" inputmode="none" autocomplete="off" placeholder="Enter number" aria-label="Number">
+          <button class="icon-btn plain" id="dp-back" aria-label="Delete"><svg><use href="#i-backspace"/></svg></button>
+        </div>
+        <div class="dp-grid" id="dp-grid">
+          <button data-k="1"><b>1</b><small>&nbsp;</small></button><button data-k="2"><b>2</b><small>ABC</small></button><button data-k="3"><b>3</b><small>DEF</small></button>
+          <button data-k="4"><b>4</b><small>GHI</small></button><button data-k="5"><b>5</b><small>JKL</small></button><button data-k="6"><b>6</b><small>MNO</small></button>
+          <button data-k="7"><b>7</b><small>PQRS</small></button><button data-k="8"><b>8</b><small>TUV</small></button><button data-k="9"><b>9</b><small>WXYZ</small></button>
+          <button data-k="*"><b>*</b><small>&nbsp;</small></button><button data-k="0"><b>0</b><small>+</small></button><button data-k="#"><b>#</b><small>&nbsp;</small></button>
+        </div>
+        <div class="dp-actions">
+          <button class="dp-call sip" id="dp-sip" aria-label="Call with SIP"><svg><use href="#i-phone"/></svg><span>SIP</span></button>
+          <button class="dp-call gsm" id="dp-gsm" aria-label="Call with phone SIM"><svg><use href="#i-sim"/></svg><span>Phone</span></button>
+        </div>
+      </div>
+    </div>
+
     <div id="tab-recents" class="tab hidden">
       <ul id="recents" class="list"></ul>
     </div>
@@ -131,6 +154,33 @@
           <label class="switch"><input type="checkbox" id="opt-speaker"><span></span></label></div>
         <div class="setting"><div><b>Data saver</b><p class="muted">Video at 360p on weak mobile data</p></div>
           <label class="switch"><input type="checkbox" id="opt-saver"><span></span></label></div>
+      </div>
+
+      <h3 class="sect">Dial pad &amp; SIP</h3>
+      <div class="card list-card" id="sip-card">
+        <div class="setting"><div><b>SIP account</b><p class="muted" id="sip-status-text">Off</p></div>
+          <label class="switch"><input type="checkbox" id="sip-enabled"><span></span></label></div>
+        <div class="app-block" id="sip-form">
+          <div class="form sip-fields">
+            <label>SIP username / extension<input id="sip-user" autocapitalize="none" autocomplete="off" placeholder="e.g. 101"></label>
+            <label>SIP password<input id="sip-pass" type="password" autocomplete="off"></label>
+            <label>SIP domain / server<input id="sip-domain" autocapitalize="none" autocomplete="off" placeholder="e.g. pbx.fitx.qa"></label>
+            <label>WebSocket URL (WSS)<input id="sip-wss" autocapitalize="none" autocomplete="off" placeholder="wss://pbx.fitx.qa:8089/ws"></label>
+            <details><summary class="muted">More options</summary>
+              <label>Display name<input id="sip-name" placeholder="Shown to people you call"></label>
+              <label>Auth username (if different)<input id="sip-auth" autocapitalize="none" autocomplete="off"></label>
+              <label>Dial prefix (added before numbers)<input id="sip-prefix" inputmode="tel" autocomplete="off" placeholder="e.g. 0 or 00974"></label>
+            </details>
+            <button class="btn primary" type="button" id="sip-save">Save &amp; connect</button>
+            <p class="muted">Your PBX / VoIP provider must support <b>WebRTC (SIP over WSS)</b>.</p>
+          </div>
+        </div>
+        <div class="app-block"><b>Keypad call button</b>
+          <div class="seg" data-route>
+            <button data-v="both">Show both</button><button data-v="sip">SIP only</button><button data-v="gsm">Phone only</button>
+          </div></div>
+        <div class="setting native-only"><div><b>Phone calls: call directly</b><p class="muted">Off = open the phone's dialer first</p></div>
+          <label class="switch"><input type="checkbox" id="opt-direct"><span></span></label></div>
       </div>
 
       <h3 class="sect">Appearance</h3>
@@ -196,6 +246,7 @@
     <nav class="tabs">
       <button data-tab="contacts" class="on"><svg><use href="#i-users"/></svg>Team</button>
       <button data-tab="chats"><svg><use href="#i-chat"/></svg>Chats<i id="chat-badge" class="nbadge hidden"></i></button>
+      <button data-tab="keypad"><svg><use href="#i-dialpad"/></svg>Keypad</button>
       <button data-tab="recents"><svg><use href="#i-clock"/></svg>Recents</button>
       <button data-tab="admin" id="nav-admin" class="hidden"><svg><use href="#i-shield"/></svg>Admin</button>
       <button data-tab="settings"><svg><use href="#i-gear"/></svg>Settings</button>
@@ -262,11 +313,25 @@
     <div class="call-actions">
       <button class="round dark" id="b-mute"><svg><use href="#i-mic"/></svg><span>Mute</span></button>
       <button class="round dark" id="b-speaker"><svg><use href="#i-speaker"/></svg><span>Speaker</span></button>
+      <button class="round dark sip-only" id="b-keys"><svg><use href="#i-dialpad"/></svg><span>Keypad</span></button>
       <button class="round dark vid-only" id="b-cam"><svg><use href="#i-video"/></svg><span>Camera</span></button>
       <button class="round dark vid-only" id="b-flip"><svg><use href="#i-cam"/></svg><span>Flip</span></button>
       <button class="round red" id="b-end"><svg><use href="#i-end"/></svg><span>End</span></button>
     </div>
   </section>
+
+  <div id="dtmf" class="dtmf hidden">
+    <div class="dtmf-box">
+      <div class="dtmf-show" id="dtmf-show"></div>
+      <div class="dp-grid" id="dtmf-grid">
+        <button data-k="1"><b>1</b></button><button data-k="2"><b>2</b></button><button data-k="3"><b>3</b></button>
+        <button data-k="4"><b>4</b></button><button data-k="5"><b>5</b></button><button data-k="6"><b>6</b></button>
+        <button data-k="7"><b>7</b></button><button data-k="8"><b>8</b></button><button data-k="9"><b>9</b></button>
+        <button data-k="*"><b>*</b></button><button data-k="0"><b>0</b></button><button data-k="#"><b>#</b></button>
+      </div>
+      <button class="btn ghost wide" id="dtmf-close">Hide keypad</button>
+    </div>
+  </div>
 
   <div id="modal" class="modal hidden">
     <form class="card form" id="modal-form">
