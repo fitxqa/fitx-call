@@ -1,12 +1,13 @@
 // FitX Call — messaging: text, voice messages, photos, videos.
 // Free Firebase plan has no file Storage, so media is stored in Firestore split into ~900 KB pieces.
 import {
-  doc, collection, setDoc, updateDoc, addDoc, getDoc, query, where, orderBy, limit,
+  doc, collection, setDoc, updateDoc, addDoc, getDoc, getDocs, deleteDoc, query, where, orderBy, limit,
   onSnapshot, serverTimestamp, increment, Bytes,
 } from 'firebase/firestore';
 
 const PART = 900 * 1024;
-const MAX_VIDEO = 16 * 1024 * 1024;
+const MAX_VIDEO = 8 * 1024 * 1024;   // keeps the free 1 GB database allowance safe
+const KEEP_DAYS = 30;               // photos / voice / video auto-delete after 30 days
 const MAX_IMAGE_IN = 30 * 1024 * 1024;
 const MAX_VOICE_SEC = 180;
 
@@ -45,6 +46,23 @@ export function createChat(ctx) {
       firstList = false;
       renderList();
     }, () => {});
+    setTimeout(cleanupOldMedia, 20000);
+  }
+  // Free-plan housekeeping: delete my own photos/voice/videos older than KEEP_DAYS (text stays).
+  async function cleanupOldMedia() {
+    const me = getMe(); const db = getDb(); if (!me) return;
+    try {
+      const k = 'fitx-clean-' + me.uid;
+      try { if (Date.now() - Number(localStorage.getItem(k) || 0) < 86400000) return; localStorage.setItem(k, String(Date.now())); } catch (e) {}
+      const cutoff = Date.now() - KEEP_DAYS * 86400000;
+      const snap = await getDocs(query(collection(db, 'media'), where('owner', '==', me.uid)));
+      for (const d of snap.docs) {
+        if ((d.data().createdAtMs || 0) > cutoff) continue;
+        const n = d.data().parts || 1;
+        for (let i = 0; i < n; i++) await deleteDoc(doc(db, 'media', d.id, 'parts', String(i))).catch(() => {});
+        await deleteDoc(d.ref).catch(() => {});
+      }
+    } catch (e) { /* try again tomorrow */ }
   }
   function stop() {
     if (unsubList) unsubList(); unsubList = null;
@@ -156,7 +174,7 @@ export function createChat(ctx) {
     if (mediaCache.has(id)) return mediaCache.get(id);
     const db = getDb();
     const meta = await getDoc(doc(db, 'media', id));
-    if (!meta.exists()) throw new Error('missing');
+    if (!meta.exists()) throw new Error('expired');
     const n = meta.data().parts || 1;
     const chunks = await Promise.all(Array.from({ length: n }, (_, i) => getDoc(doc(db, 'media', id, 'parts', String(i)))));
     const blob = new Blob(chunks.map((c) => c.data().d.toUint8Array()), { type: meta.data().mime || mime });
@@ -172,11 +190,11 @@ export function createChat(ctx) {
     if (img) {
       viewer(`<img src="${esc(img.src)}">`);
       try { const url = await loadMedia(img.dataset.media, img.dataset.mime); if (!$('viewer').classList.contains('hidden')) $('viewer-body').innerHTML = `<img src="${url}">`; }
-      catch (x) { toast('Could not load photo'); }
+      catch (x) { toast(x.message === 'expired' ? `Photo expired (kept ${KEEP_DAYS} days)` : 'Could not load photo'); }
     } else if (vid) {
       viewer('<p class="muted">Loading video…</p>');
       try { const url = await loadMedia(vid.dataset.media, vid.dataset.mime); if (!$('viewer').classList.contains('hidden')) $('viewer-body').innerHTML = `<video src="${url}" controls autoplay playsinline></video>`; }
-      catch (x) { toast('Could not load video'); closeViewer(); }
+      catch (x) { toast(x.message === 'expired' ? `Video expired (kept ${KEEP_DAYS} days)` : 'Could not load video'); closeViewer(); }
     } else if (aud) {
       const box = aud.closest('.audio');
       if (playing && playing.box === box) { if (playing.a.paused) playing.a.play(); else playing.a.pause(); return; }
@@ -192,7 +210,7 @@ export function createChat(ctx) {
         a.onended = () => { btn().innerHTML = '<svg><use href="#i-play"/></svg>'; box.querySelector('.bar i').style.width = '0'; playing = null; };
         a.ontimeupdate = () => { if (a.duration && isFinite(a.duration)) box.querySelector('.bar i').style.width = (100 * a.currentTime / a.duration) + '%'; };
         await a.play();
-      } catch (x) { aud.innerHTML = '<svg><use href="#i-play"/></svg>'; toast('Could not play voice message'); }
+      } catch (x) { aud.innerHTML = '<svg><use href="#i-play"/></svg>'; toast(x.message === 'expired' ? `Voice message expired (kept ${KEEP_DAYS} days)` : 'Could not play voice message'); }
     }
   });
   function viewer(html) { $('viewer-body').innerHTML = html; $('viewer').classList.remove('hidden'); }

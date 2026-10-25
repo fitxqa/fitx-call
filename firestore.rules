@@ -87,7 +87,7 @@ service cloud.firestore {
 
       match /parts/{part} {
         allow read: if active() && inChat(get(/databases/$(database)/documents/media/$(mediaId)).data.chatId);
-        allow create: if active() && get(/databases/$(database)/documents/media/$(mediaId)).data.owner == request.auth.uid;
+        allow create, delete: if active() && get(/databases/$(database)/documents/media/$(mediaId)).data.owner == request.auth.uid;
       }
     }
   }
