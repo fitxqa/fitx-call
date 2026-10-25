@@ -25,6 +25,10 @@ window.FITX_CONFIG = {
   //   turn: [{ urls: ["turn:SERVER:3478", "turn:SERVER:3478?transport=tcp"], username: "USER", credential: "PASSWORD" }],
   // (B) Metered Open Relay (free 20 GB/month): paste your credentials API link:
   //   turnApiUrl: "https://YOURAPP.metered.live/api/v1/turn/credentials?apiKey=YOUR_KEY",
-  turn: [],
+  turn: [{
+    urls: ["turn:free.expressturn.com:3478", "turn:free.expressturn.com:3478?transport=tcp"],
+    username: "000000002108247908",
+    credential: "SElZVXW9r6g301dwx3iKmpo5nAc="
+  }],
   turnApiUrl: ""
 };
