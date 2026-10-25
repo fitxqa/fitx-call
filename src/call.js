@@ -5,11 +5,24 @@ import {
 
 const CFG = window.FITX_CONFIG || {};
 
+// TURN relay: static entries in CFG.turn, and/or fetched from CFG.turnApiUrl (e.g. Metered), cached 1 hour.
+let fetchedTurn = [], fetchedAt = 0;
+export async function loadTurn() {
+  if (!CFG.turnApiUrl || Date.now() - fetchedAt < 3600000) return;
+  try {
+    const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 5000);
+    const r = await fetch(CFG.turnApiUrl, { signal: ctl.signal }); clearTimeout(t);
+    const j = await r.json();
+    const list = Array.isArray(j) ? j : (j.iceServers || []);
+    if (list.length) { fetchedTurn = list; fetchedAt = Date.now(); }
+  } catch (e) { /* keep last good list */ }
+}
 export function iceConfig() {
   return {
     iceServers: [
       { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] },
       ...(Array.isArray(CFG.turn) ? CFG.turn : []),
+      ...fetchedTurn,
     ],
     iceCandidatePoolSize: 2,
     bundlePolicy: 'max-bundle',
@@ -166,7 +179,7 @@ export class CallSession {
 
   // ---------- caller ----------
   async start() {
-    await this.getMedia();
+    await Promise.all([this.getMedia(), loadTurn()]);
     this.makePc();
     const offer = await this.pc.createOffer();
     offer.sdp = tuneSdp(offer.sdp);
@@ -197,7 +210,14 @@ export class CallSession {
         await this.drainRemote();
       } catch (e) { console.warn('answer', e); }
     }
-    if (d.status === 'active') { clearTimeout(this.ringTimer); if (!this.connectedOnce) this.hooks.onState?.('Connecting…'); }
+    if (d.status === 'active') {
+      clearTimeout(this.ringTimer);
+      if (!this.connectedOnce) {
+        this.hooks.onState?.('Connecting…');
+        clearTimeout(this.slowTimer);
+        this.slowTimer = setTimeout(() => { if (!this.connectedOnce && !this.ended) this.hooks.onState?.('Network is blocking the call — relay (TURN) needed'); }, 15000);
+      }
+    }
     if (d.status === 'ringing') this.hooks.onState?.(d.delivered ? 'Ringing…' : 'Calling…');
     if (['declined', 'busy', 'ended', 'missed', 'cancelled'].includes(d.status)) {
       const why = { declined: 'Call declined', busy: 'Busy on another call', ended: 'Call ended', missed: 'No answer', cancelled: 'Call ended' }[d.status];
@@ -223,7 +243,7 @@ export class CallSession {
 
   // ---------- callee ----------
   async accept(callData) {
-    await this.getMedia();
+    await Promise.all([this.getMedia(), loadTurn()]);
     this.makePc();
     this.listenRemoteCandidates();
     await this.answerOffer(callData.offer, true);

@@ -20,10 +20,11 @@ window.FITX_CONFIG = {
   // (no real email is needed).
   loginDomain: "fitxcall.local",
 
-  // OPTIONAL but strongly recommended for calls over mobile data (4G/5G):
-  // a TURN relay server. Free option: https://www.metered.ca/stun-turn
-  // Example:
-  // turn: [{ urls: ["turn:global.relay.metered.ca:80", "turn:global.relay.metered.ca:443?transport=tcp"],
-  //          username: "YOUR_USER", credential: "YOUR_PASSWORD" }]
-  turn: []
+  // TURN relay — needed for calls over mobile data (4G/5G). Use ONE of these:
+  // (A) ExpressTURN (free 1000 GB/month): paste the server, username and password from your dashboard:
+  //   turn: [{ urls: ["turn:SERVER:3478", "turn:SERVER:3478?transport=tcp"], username: "USER", credential: "PASSWORD" }],
+  // (B) Metered Open Relay (free 20 GB/month): paste your credentials API link:
+  //   turnApiUrl: "https://YOURAPP.metered.live/api/v1/turn/credentials?apiKey=YOUR_KEY",
+  turn: [],
+  turnApiUrl: ""
 };
