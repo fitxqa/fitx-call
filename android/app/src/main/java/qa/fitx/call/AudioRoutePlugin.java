@@ -105,6 +105,36 @@ public class AudioRoutePlugin extends Plugin {
         call.resolve();
     }
 
+    // ---------- native background listener (works when the app is closed) ----------
+    @PluginMethod
+    public void nativeSignIn(PluginCall call) {
+        String email = call.getString("email", ""), password = call.getString("password", ""), db = call.getString("db", "(default)");
+        NativeWatcher.prefs(getContext()).edit().putString("db", db).apply();
+        try {
+            NativeWatcher.app(getContext());
+            com.google.firebase.auth.FirebaseAuth.getInstance().signInWithEmailAndPassword(email, password)
+                .addOnSuccessListener((r) -> { NativeWatcher.start(getContext()); CallService.start(getContext(), false); call.resolve(); })
+                .addOnFailureListener((e) -> call.reject(e.getMessage() == null ? "failed" : e.getMessage()));
+        } catch (Exception e) { call.reject(e.getMessage() == null ? "failed" : e.getMessage()); }
+    }
+
+    @PluginMethod
+    public void nativeStatus(PluginCall call) {
+        JSObject r = new JSObject();
+        String uid = null;
+        try { com.google.firebase.auth.FirebaseUser u = com.google.firebase.auth.FirebaseAuth.getInstance().getCurrentUser(); if (u != null) uid = u.getUid(); } catch (Exception ignored) {}
+        r.put("signedIn", uid != null);
+        r.put("uid", uid);
+        call.resolve(r);
+    }
+
+    @PluginMethod
+    public void nativeSignOut(PluginCall call) {
+        NativeWatcher.stop();
+        try { com.google.firebase.auth.FirebaseAuth.getInstance().signOut(); } catch (Exception ignored) {}
+        call.resolve();
+    }
+
     // ---------- ringing ----------
     @PluginMethod
     public void ringIncoming(PluginCall call) {

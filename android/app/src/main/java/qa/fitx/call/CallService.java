@@ -44,7 +44,7 @@ public class CallService extends Service {
         Notification n = new NotificationCompat.Builder(this, CH_SERVICE)
             .setSmallIcon(android.R.drawable.sym_action_call)
             .setContentTitle(inCall ? "FitX Call — on a call" : "FitX Call")
-            .setContentText(inCall ? "Tap to return to the call" : "Ready to receive calls")
+            .setContentText(inCall ? "Tap to return to the call" : (NativeWatcher.signedIn() ? "Ready to receive calls" : "Open the app to finish setup"))
             .setColor(0xFFFF6A13)
             .setOngoing(true)
             .setSilent(true)
@@ -64,21 +64,20 @@ public class CallService extends Service {
             catch (Exception ignored) { stopSelf(); return START_NOT_STICKY; }
         }
         running = true;
-        return START_NOT_STICKY;
+        NativeWatcher.start(this);   // native listener: rings even after the app is swiped away
+        return START_STICKY;
     }
 
-    /** App swiped away from recents: the call engine is gone, so be honest about it. */
+    /** App swiped away: keep running — the native watcher still rings for calls. */
     @Override
     public void onTaskRemoved(Intent rootIntent) {
-        running = false;
-        CallNotifications.showClosed(this);
-        stopSelf();
         super.onTaskRemoved(rootIntent);
     }
 
     @Override
     public void onDestroy() {
         running = false;
+        NativeWatcher.stop();
         super.onDestroy();
     }
 

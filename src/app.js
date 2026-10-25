@@ -141,6 +141,7 @@ $('login-form').addEventListener('submit', async (e) => {
     const email = await emailFor(u);
     $('login-err').textContent = 'Checking password…';
     await withTimeout(signInWithEmailAndPassword(auth, email, $('login-pass').value), 20000, 'timeout');
+    nativeSignIn(email, $('login-pass').value);
     $('login-err').textContent = 'Loading your account…';
   } catch (err) {
     const c = err.code || String(err.message || '');
@@ -157,7 +158,7 @@ $('login-form').addEventListener('submit', async (e) => {
 
 $('logout').addEventListener('click', async () => {
   if (!confirm('Sign out? You will not receive calls on this phone.')) return;
-  if (native) Native.stopService().catch(() => {});
+  if (native) { Native.nativeSignOut().catch(() => {}); Native.stopService().catch(() => {}); }
   await signOut(auth);
 });
 
@@ -204,6 +205,7 @@ $('setup-form').addEventListener('submit', async (e) => {
       if (!String(x.code).includes('email-already-in-use')) throw x;
       cred = await signInWithEmailAndPassword(auth, email, password); // created earlier, finish setup
     }
+    nativeSignIn(email, password);
     const uid = cred.user.uid;
     const b = writeBatch(db);
     b.set(doc(db, 'users', uid), { name, username, department: 'Management', role: 'admin', disabled: false, createdAt: serverTimestamp() });
@@ -274,7 +276,10 @@ async function onLogin(user) {
   if (me.role === 'admin') watchAdmin();
   ping();
   heartbeat = setInterval(ping, 60000);
-  if (native) { Native.startService().catch(() => {}); refreshChecks(); }
+  if (native) {
+    Native.startService().catch(() => {}); refreshChecks();
+    setTimeout(async () => { if (me && !(await ensureNativeLogin(false))) ensureNativeLogin(true); }, 2500);
+  }
   else $('checks').innerHTML = '<li class="muted">Background ringing works in the Android app</li>';
 }
 
@@ -300,6 +305,28 @@ function ping() {
 }
 
 // ---------- Reliability checklist (Settings) ----------
+// The background service has its own native login so it can ring when the app is closed.
+let nativePending = null;
+function nativeSignIn(email, password) {
+  if (!native) return Promise.resolve(false);
+  nativePending = Native.nativeSignIn({ email, password, db: DBID }).then(() => true).catch(() => false);
+  return nativePending;
+}
+async function ensureNativeLogin(askNow) {
+  if (!native || !me || !auth.currentUser) return;
+  if (nativePending) await nativePending;
+  let st = { signedIn: false };
+  try { st = await Native.nativeStatus(); } catch (e) { return; }
+  if (st.signedIn && st.uid === auth.currentUser.uid) return true;
+  if (!askNow) return false;
+  const pw = prompt('Enter your password once so calls can ring when the app is closed:');
+  if (!pw) return false;
+  const ok = await nativeSignIn(auth.currentUser.email, pw);
+  toast(ok ? 'Done — calls will ring even when the app is closed' : 'Wrong password — try again in Settings', 3500);
+  refreshChecks();
+  return ok;
+}
+
 async function refreshChecks() {
   if (!native || !me) return;
   try {
@@ -310,6 +337,7 @@ async function refreshChecks() {
       row(r.battery, 'Battery: unrestricted', 'Fix', 'battery'),
       row(r.fullScreen, 'Show calls on lock screen', 'Allow', 'fullscreen'),
       row(r.service, 'Ready for calls in background', 'Start', 'service'),
+      row(!!(await ensureNativeLogin(false)), 'Ring when app is closed', 'Turn on', 'native'),
     ].join('');
     const bad = [r.notifications, r.battery, r.fullScreen].filter((x) => !x).length;
     if (bad && !sessionStorage.getItem('warned')) { sessionStorage.setItem('warned', '1'); toast('Settings → fix the ✗ items so calls can ring', 4000); }
@@ -321,6 +349,7 @@ $('checks').addEventListener('click', (e) => {
   if (a === 'notif') Native.openNotificationSettings();
   if (a === 'battery') Native.openBatterySettings();
   if (a === 'fullscreen') Native.openFullScreenSettings();
+  if (a === 'native') { ensureNativeLogin(true); return; }
   if (a === 'service') Native.startService().then(() => setTimeout(refreshChecks, 800));
 });
 
