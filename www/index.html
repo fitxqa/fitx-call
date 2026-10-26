@@ -121,6 +121,7 @@
     </div>
 
     <div id="tab-recents" class="tab hidden">
+      <div class="recents-top"><span class="muted">Press and hold a call to delete it</span><button class="btn small" id="recents-clear">Clear all</button></div>
       <ul id="recents" class="list"></ul>
     </div>
 
@@ -358,11 +359,14 @@
       <p class="muted" id="c-status">Calling…</p>
       <p class="quality" id="c-quality"></p>
       <p class="hold-tag hidden" id="c-hold"></p>
+      <div class="vid-ask hidden" id="c-vidask"><span id="c-vidask-text">Turned on video</span>
+        <button class="btn small primary" id="c-vidask-yes">Turn on my camera</button><button class="btn small" id="c-vidask-no">Not now</button></div>
     </div>
     <div class="call-actions">
       <button class="round dark" id="b-mute"><svg><use href="#i-mic"/></svg><span>Mute</span></button>
       <button class="round dark" id="b-speaker"><svg><use href="#i-speaker"/></svg><span>Speaker</span></button>
       <button class="round dark" id="b-hold"><svg><use href="#i-pause"/></svg><span>Hold</span></button>
+      <button class="round dark app-only voice-only" id="b-upgrade"><svg><use href="#i-video"/></svg><span>Video</span></button>
       <button class="round dark app-only" id="b-msg"><svg><use href="#i-chat"/></svg><span>Message</span></button>
       <button class="round dark sip-only" id="b-keys"><svg><use href="#i-dialpad"/></svg><span>Keypad</span></button>
       <button class="round dark vid-only" id="b-cam"><svg><use href="#i-video"/></svg><span>Camera</span></button>

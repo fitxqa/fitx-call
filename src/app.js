@@ -7,7 +7,7 @@ import {
 } from 'firebase/auth';
 import {
   initializeFirestore, writeBatch, doc, getDoc, setDoc, updateDoc, deleteDoc, collection, query, where, orderBy, limit,
-  onSnapshot, serverTimestamp, arrayRemove,
+  onSnapshot, serverTimestamp, arrayRemove, getDocs,
 } from 'firebase/firestore';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { App } from '@capacitor/app';
@@ -74,8 +74,15 @@ const Tone = {
     freqs.forEach((f) => { const o = ctx.createOscillator(); o.frequency.value = f; o.connect(g); o.start(); o.stop(ctx.currentTime + dur); });
   },
   ring() { this.stop(); const play = () => { this._beep([880, 1100], 0.35, 0.22); setTimeout(() => this._beep([880, 1100], 0.35, 0.22), 450); if (navigator.vibrate) navigator.vibrate([400, 200, 400]); }; play(); this.timer = setInterval(play, 2200); },
-  ringback() { this.stop(); const play = () => this._beep([425], 1.0, 0.08); play(); this.timer = setInterval(play, 4000); },
-  stop() { clearInterval(this.timer); this.timer = null; if (navigator.vibrate) navigator.vibrate(0); },
+  ringback() {
+    this.stop();
+    if (native) { this.nativeRb = true; Native.ringback({ on: true }).catch(() => {}); return; } // plays on the call stream → earpiece
+    const play = () => this._beep([425], 1.0, 0.08); play(); this.timer = setInterval(play, 4000);
+  },
+  stop() {
+    clearInterval(this.timer); this.timer = null; if (navigator.vibrate) navigator.vibrate(0);
+    if (this.nativeRb) { this.nativeRb = false; Native.ringback({ on: false }).catch(() => {}); }
+  },
 };
 
 // ---------- Firebase ----------
@@ -506,7 +513,7 @@ function renderRecents(all) {
   $('recents').innerHTML = all.length ? all.map((c) => {
     const out = c.dir === 'out';
     if (c.type === 'conf') {
-      return `<li>
+      return `<li data-log="${esc(c.id)}">
         <div class="avatar"><svg style="width:22px;height:22px"><use href="#i-group"/></svg></div>
         <div class="who"><b>${esc(c.peerName || 'Group call')}</b><small class="dir">${out ? '↗' : '↙'} Group ${c.media === 'video' ? 'video' : 'voice'} call${c.duration ? ' · ' + fmtDur(c.duration) : ''} · ${ago(c.createdAtMs)}</small></div>
       </li>`;
@@ -516,7 +523,7 @@ function renderRecents(all) {
       const miss = !out && ['missed', 'cancelled'].includes(c.status);
       const lbl = c.type === 'phone' ? 'Phone call' : miss ? 'Missed SIP call' : c.status === 'declined' ? 'Declined SIP call' : 'SIP call';
       const route = c.type === 'phone' ? 'gsm' : 'sip';
-      return `<li>
+      return `<li data-log="${esc(c.id)}">
         <div class="avatar">#</div>
         <div class="who"><b>${esc(c.peerName || num)}</b><small class="dir ${miss ? 'missed' : ''}">${out ? '↗' : '↙'} ${lbl}${c.duration ? ' · ' + fmtDur(c.duration) : ''} · ${ago(c.createdAtMs)}</small></div>
         <button class="icon-btn" data-dial="${esc(num)}" data-route="${route}"><svg><use href="#i-${route === 'gsm' ? 'sim' : 'phone'}"/></svg></button>
@@ -527,7 +534,7 @@ function renderRecents(all) {
     const dur = c.duration ? fmtDur(c.duration) : '';
     const label = missed ? 'Missed' : c.status === 'declined' ? 'Declined' : c.status === 'busy' ? 'Busy'
       : (!out || c.status === 'answered' || c.status === 'ended') ? (out ? 'Outgoing' : 'Incoming') : 'Not answered';
-    return `<li>
+    return `<li data-log="${esc(c.id)}">
       <div class="avatar">${esc(initials(c.peerName))}</div>
       <div class="who"><b>${esc(c.peerName)}</b><small class="dir ${missed ? 'missed' : ''}">${out ? '↗' : '↙'} ${label} ${c.type === 'video' ? 'video' : 'voice'}${dur ? ' · ' + dur : ''} · ${ago(c.createdAtMs)}</small></div>
       <button class="icon-btn" data-call="${esc(c.peerUid)}" data-type="${c.type === 'video' ? 'video' : 'audio'}"><svg><use href="#i-${c.type === 'video' ? 'video' : 'phone'}"/></svg></button>
@@ -662,7 +669,7 @@ function setSpeaker(on) {
 function hooks() {
   return {
     onRemoteStream: (stream) => {
-      if (current?.type === 'video') { $('remote-video').srcObject = stream; $('remote-audio').srcObject = null; }
+      if (current?.type === 'video' || $('s-call').classList.contains('is-video')) { $('remote-video').srcObject = stream; $('remote-audio').srcObject = null; }
       else $('remote-audio').srcObject = stream;
       $('remote-video').play?.().catch(() => {}); $('remote-audio').play?.().catch(() => {});
     },
@@ -680,6 +687,7 @@ function hooks() {
     },
     onQuality: (q) => { $('c-quality').textContent = q; },
     onPeerHold: () => renderHold(),
+    onPeerVideo: (on) => onPeerVideo(on),
     onEnded: (why) => endUi(why),
   };
 }
@@ -788,7 +796,8 @@ function startTimerLabel() {
 function openCallUi(peerName, type) {
   muted = false; camOn = true; autoHeld = false;
   $('b-mute').classList.remove('active'); $('b-cam').classList.remove('active'); $('b-hold').classList.remove('active');
-  $('c-hold').classList.add('hidden'); $('s-call').classList.remove('on-hold');
+  $('c-hold').classList.add('hidden'); $('s-call').classList.remove('on-hold', 'no-local');
+  $('c-vidask').classList.add('hidden');
   $('local-video').style.visibility = 'visible';
   $('c-name').textContent = peerName; $('c-avatar').textContent = initials(peerName);
   $('c-quality').textContent = '';
@@ -837,6 +846,75 @@ function endUi(why) {
 }
 
 $('b-end').addEventListener('click', () => current?.hangup());
+
+// ----- Voice call → video call -----
+function enterVideoUi() {
+  if (!current) return;
+  const hasLocalVideo = current.local && current.local.getVideoTracks().length > 0;
+  const sc = $('s-call');
+  sc.classList.add('is-video', 'video-on');
+  sc.classList.toggle('no-local', !hasLocalVideo);
+  $('remote-audio').srcObject = null;
+  $('remote-video').srcObject = current.remote || null;
+  $('remote-video').play && $('remote-video').play().catch(() => {});
+  if (hasLocalVideo) $('local-video').srcObject = current.local;
+  resetVideoLayout(true);
+  setSpeaker(true);
+  armHide();
+  if (native) Native.setPip({ enabled: true }).catch(() => {});
+}
+async function turnOnMyVideo() {
+  if (!current || current.kind === 'sip') return;
+  try {
+    await current.upgradeVideo();
+    $('c-vidask').classList.add('hidden');
+    camOn = true; $('b-cam').classList.remove('active'); $('local-video').style.visibility = 'visible';
+    enterVideoUi();
+  } catch (e) { toast(e && e.name === 'NotAllowedError' ? 'Allow camera permission' : (e.message || 'Could not turn on video'), 3500); }
+}
+function onPeerVideo(on) {
+  if (!current || !on) return;
+  if (!$('s-call').classList.contains('is-video')) enterVideoUi();
+  const mineOn = current.local && current.local.getVideoTracks().length > 0;
+  if (!mineOn) {
+    $('c-vidask-text').textContent = `${current.peer.name} turned on video`;
+    $('c-vidask').classList.remove('hidden');
+  }
+}
+$('b-upgrade').addEventListener('click', (e) => { e.stopPropagation(); turnOnMyVideo(); });
+$('c-vidask-yes').addEventListener('click', (e) => { e.stopPropagation(); turnOnMyVideo(); });
+$('c-vidask-no').addEventListener('click', (e) => { e.stopPropagation(); $('c-vidask').classList.add('hidden'); });
+
+// ----- Call history: clear all, or press-and-hold one call to delete it -----
+async function clearHistory() {
+  if (!me) return;
+  if (!confirm('Clear your whole call history? This only clears it on your account.')) return;
+  try {
+    const snap = await getDocs(collection(db, 'users', me.uid, 'log'));
+    let batch = writeBatch(db), n = 0;
+    for (const d of snap.docs) {
+      batch.delete(d.ref);
+      if (++n % 400 === 0) { await batch.commit(); batch = writeBatch(db); }
+    }
+    await batch.commit();
+    toast(snap.size ? `Cleared ${snap.size} call${snap.size === 1 ? '' : 's'}` : 'Call history is already empty');
+  } catch (e) { toast('Could not clear call history'); }
+}
+$('recents-clear').addEventListener('click', clearHistory);
+let lpT = null;
+$('recents').addEventListener('pointerdown', (e) => {
+  const li = e.target.closest('li[data-log]'); if (!li || e.target.closest('button')) return;
+  li.classList.add('pressing');
+  lpT = setTimeout(async () => {
+    li.classList.remove('pressing');
+    if (!confirm('Delete this call from history?')) return;
+    try { await deleteDoc(doc(db, 'users', me.uid, 'log', li.dataset.log)); toast('Deleted'); } catch (x) { toast('Could not delete'); }
+  }, 650);
+});
+['pointerup', 'pointerleave', 'pointercancel', 'pointermove'].forEach((ev) => $('recents').addEventListener(ev, (e) => {
+  if (ev === 'pointermove' && Math.abs(e.movementY || 0) < 4) return;
+  clearTimeout(lpT); document.querySelectorAll('#recents li.pressing').forEach((x) => x.classList.remove('pressing'));
+}));
 
 // ----- Hold: manual button, and automatic while a normal phone call is going on -----
 let autoHeld = false;
@@ -888,7 +966,9 @@ if (native) {
 }
 $('b-mute').addEventListener('click', () => { muted = !muted; current?.setMuted(muted); $('b-mute').classList.toggle('active', muted); });
 $('b-speaker').addEventListener('click', () => setSpeaker(!speakerOn));
-$('b-cam').addEventListener('click', () => { camOn = !camOn; current?.setCamera(camOn); $('b-cam').classList.toggle('active', !camOn); $('local-video').style.visibility = camOn ? 'visible' : 'hidden'; });
+$('b-cam').addEventListener('click', () => {
+  if (current && current.kind !== 'sip' && !(current.local && current.local.getVideoTracks().length)) return turnOnMyVideo();
+  camOn = !camOn; current?.setCamera(camOn); $('b-cam').classList.toggle('active', !camOn); $('local-video').style.visibility = camOn ? 'visible' : 'hidden'; });
 $('b-flip').addEventListener('click', async () => {
   try { const f = await current?.flipCamera(); $('local-video').srcObject = current.local; $('local-video').classList.toggle('back', f === 'environment'); }
   catch (e) { toast('Could not switch camera'); }

@@ -107,6 +107,9 @@ export class CallSession {
     const pc = new RTCPeerConnection(iceConfig());
     this.pc = pc;
     this.local.getTracks().forEach((t) => pc.addTrack(t, this.local));
+    if (this.type === 'audio' && this.role === 'caller') {
+      try { this.videoTx = pc.addTransceiver('video', { direction: 'sendrecv' }); } catch (e) { this.videoTx = null; }
+    }
     this.remote = new MediaStream();
     pc.ontrack = (e) => {
       e.streams[0] ? e.streams[0].getTracks().forEach((t) => this.remote.addTrack(t)) : this.remote.addTrack(e.track);
@@ -203,7 +206,33 @@ export class CallSession {
     }, 45000);
   }
 
+  watchVideo(d) {
+    const v = d.video || {};
+    const pv = !!v[this.peer.uid];
+    if (pv !== !!this.peerVideo) { this.peerVideo = pv; this.hooks.onPeerVideo?.(pv); }
+  }
+
+  canVideo() { return this.type === 'video' || !!this.videoTx; }
+
+  /** Voice call → video call: turn my camera on and send it on the idle video lane. */
+  async upgradeVideo() {
+    if (this.ended) return;
+    if (this.type === 'video' && this.local.getVideoTracks().length) { this.setCamera(true); return; }
+    if (!this.videoTx) throw new Error('The other phone needs the latest FitX Call to switch to video');
+    const c = mediaConstraints('video', this.saver, this.facing).video;
+    const cam = await navigator.mediaDevices.getUserMedia({ video: c, audio: false });
+    const track = cam.getVideoTracks()[0];
+    await this.videoTx.sender.replaceTrack(track);
+    this.local.addTrack(track);
+    this.type = 'video';
+    this.camOff = false;
+    this.applyTracks();
+    tuneSenders(this.pc, this.saver);
+    updateDoc(this.callRef, { [`video.${this.me.uid}`]: true }).catch(() => {});
+  }
+
   watchHold(d) {
+    this.watchVideo(d);
     const h = d.hold || {};
     const ph = !!h[this.peer.uid];
     if (ph !== !!this.peerHeld) { this.peerHeld = ph; this.hooks.onPeerHold?.(ph, h[this.peer.uid]); if (!ph) this.maybeRepair(); }
@@ -269,6 +298,10 @@ export class CallSession {
     if (!offer || offer.rev <= this.answeredRev) return;
     this.answeredRev = offer.rev;
     await this.pc.setRemoteDescription({ type: 'offer', sdp: offer.sdp });
+    if (this.type === 'audio' && !this.videoTx) {
+      const tx = this.pc.getTransceivers().find((t) => t.receiver && t.receiver.track && t.receiver.track.kind === 'video' && !(t.sender && t.sender.track));
+      if (tx) { try { tx.direction = 'sendrecv'; } catch (e) {} this.videoTx = tx; }
+    }
     await this.drainRemote();
     const ans = await this.pc.createAnswer();
     ans.sdp = tuneSdp(ans.sdp);

@@ -343,3 +343,9 @@ body.oncall #s-main, body.oncall #s-chat { padding-top: calc(var(--safe-t) + 38p
 
 .hold-tag { display: inline-block; margin: 8px auto 0; padding: 6px 12px; border-radius: 99px; background: rgba(242,178,0,.18); color: #ffd75e; font-size: 13px; font-weight: 600; }
 .call.on-hold #remote-video, .call.on-hold .tile video { filter: grayscale(.8) brightness(.55); }
+
+.call.is-video .voice-only { display: none; }
+.call.is-video.no-local #local-video { display: none; }
+.vid-ask { margin: 10px auto 0; display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; background: rgba(0,0,0,.55); padding: 8px 10px; border-radius: 14px; font-size: 13px; color: #fff; z-index: 7; position: relative; }
+.recents-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 0 0 6px; font-size: 12px; }
+#recents li.pressing { background: var(--accent-soft); }

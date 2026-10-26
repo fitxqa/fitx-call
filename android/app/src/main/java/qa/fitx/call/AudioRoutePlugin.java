@@ -84,6 +84,22 @@ public class AudioRoutePlugin extends Plugin {
         if (!on) phoneBusy = false;
     }
 
+    // "Calling…" ring tone played on the call stream → comes out of the earpiece (or speaker if switched on)
+    private android.media.ToneGenerator ringbackTone;
+
+    @PluginMethod
+    public void ringback(PluginCall call) {
+        boolean on = call.getBoolean("on", false);
+        try {
+            if (ringbackTone != null) { ringbackTone.stopTone(); ringbackTone.release(); ringbackTone = null; }
+            if (on) {
+                ringbackTone = new android.media.ToneGenerator(AudioManager.STREAM_VOICE_CALL, 70);
+                ringbackTone.startTone(android.media.ToneGenerator.TONE_SUP_RINGTONE);
+            }
+        } catch (Exception ignored) {}
+        call.resolve();
+    }
+
     /** Phone call finished: take the audio back for the FitX call. */
     @PluginMethod
     public void resumeAudio(PluginCall call) {
@@ -160,6 +176,7 @@ public class AudioRoutePlugin extends Plugin {
         getActivity().runOnUiThread(() -> getActivity().getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON));
         CallNotifications.cancelIncoming(getContext());
         watchPhoneCalls(false);
+        try { if (ringbackTone != null) { ringbackTone.stopTone(); ringbackTone.release(); ringbackTone = null; } } catch (Exception ignored) {}
         CallService.callPeer = null; CallService.callStartedAt = 0;
         MainActivity.setPipAllowed(getActivity(), false);
         if (call.getBoolean("keepService", true)) CallService.start(getContext(), false);
