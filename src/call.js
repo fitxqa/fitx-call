@@ -149,9 +149,12 @@ export class CallSession {
     }
     if (state === 'failed') {
       clearTimeout(this.failTimer);
+      // On hold (e.g. a normal phone call): wait up to 10 min for the line to come back instead of 15 s.
+      const wait = this.held || this.peerHeld ? 600000 : 15000;
       this.failTimer = setTimeout(() => {
-        if (this.pc?.connectionState === 'failed') this.hangup('failed');
-      }, 15000);
+        if (this.pc?.connectionState === 'failed' && !(this.held || this.peerHeld)) this.hangup('failed');
+        else if (this.pc?.connectionState === 'failed') this.restartIce();
+      }, wait);
     }
   }
 
@@ -200,9 +203,20 @@ export class CallSession {
     }, 45000);
   }
 
+  watchHold(d) {
+    const h = d.hold || {};
+    const ph = !!h[this.peer.uid];
+    if (ph !== !!this.peerHeld) { this.peerHeld = ph; this.hooks.onPeerHold?.(ph, h[this.peer.uid]); if (!ph) this.maybeRepair(); }
+    if (this.role === 'caller' && d.restartReq && d.restartReq !== this.lastRestartReq) {
+      this.lastRestartReq = d.restartReq;
+      if (this.connectedOnce) this.restartIce();
+    }
+  }
+
   async onCallerDoc(d) {
     if (!d || this.ended) return;
     this.status = d.status;
+    this.watchHold(d);
     if (d.answer && d.answer.rev > this.answeredRev && d.answer.rev === this.offerRev) {
       this.answeredRev = d.answer.rev;
       try {
@@ -267,6 +281,7 @@ export class CallSession {
   async onCalleeDoc(d) {
     if (!d || this.ended) return;
     this.status = d.status;
+    this.watchHold(d);
     if (d.offer && d.offer.rev > this.answeredRev) {
       try { await this.answerOffer(d.offer, false); } catch (e) { console.warn('re-answer', e); }
     }
@@ -274,8 +289,33 @@ export class CallSession {
   }
 
   // ---------- controls ----------
-  setMuted(m) { this.local?.getAudioTracks().forEach((t) => { t.enabled = !m; }); }
-  setCamera(on) { this.local?.getVideoTracks().forEach((t) => { t.enabled = on; }); }
+  setMuted(m) { this.userMuted = m; this.applyTracks(); }
+  setCamera(on) { this.camOff = !on; this.applyTracks(); }
+  applyTracks() {
+    this.local?.getAudioTracks().forEach((t) => { t.enabled = !this.userMuted && !this.held; });
+    this.local?.getVideoTracks().forEach((t) => { t.enabled = !this.camOff && !this.held; });
+  }
+
+  /** Put the call on hold (manual, or automatically when a normal phone call comes in). */
+  async hold(on, reason = 'hold') {
+    if (this.ended || !!this.held === on) return;
+    this.held = on;
+    this.applyTracks();
+    updateDoc(this.callRef, { [`hold.${this.me.uid}`]: on ? reason : false }).catch(() => {});
+    if (!on) this.maybeRepair();
+  }
+
+  /** After a hold / phone call: if the connection dropped, rebuild it. */
+  maybeRepair() {
+    if (this.ended || !this.pc) return;
+    setTimeout(() => {
+      if (this.ended || !this.pc) return;
+      const st = this.pc.connectionState;
+      if (st === 'connected') return;
+      if (this.role === 'caller') this.restartIce();
+      else updateDoc(this.callRef, { restartReq: Date.now() }).catch(() => {});
+    }, 1200);
+  }
 
   async flipCamera() {
     if (this.type !== 'video') return;

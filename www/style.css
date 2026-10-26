@@ -340,3 +340,6 @@ body.oncall #s-main, body.oncall #s-chat { padding-top: calc(var(--safe-t) + 38p
 .mini-video { position: fixed; right: 12px; bottom: calc(76px + var(--safe-b)); width: 110px; aspect-ratio: 3/4; object-fit: cover; z-index: 69;
   border-radius: 14px; border: 2px solid rgba(255,255,255,.35); box-shadow: 0 8px 24px rgba(0,0,0,.5); background: #000; }
 #s-chat:not(.hidden) ~ .mini-video, body.in-chat .mini-video { bottom: calc(80px + var(--safe-b)); }
+
+.hold-tag { display: inline-block; margin: 8px auto 0; padding: 6px 12px; border-radius: 99px; background: rgba(242,178,0,.18); color: #ffd75e; font-size: 13px; font-weight: 600; }
+.call.on-hold #remote-video, .call.on-hold .tile video { filter: grayscale(.8) brightness(.55); }

@@ -49,6 +49,8 @@ class SipCall {
     // Don't wait for slow ICE gathering (TURN): send the offer/answer after ~1.5 s.
     let readyT = null;
     s.on('icecandidate', (e) => { if (!readyT) readyT = setTimeout(() => { try { e.ready(); } catch (x) {} }, 1500); });
+    s.on('hold', (e) => { if (e.originator === 'remote') { this.peerHeld = true; this.hooks.onPeerHold?.(true); } });
+    s.on('unhold', (e) => { if (e.originator === 'remote') { this.peerHeld = false; this.hooks.onPeerHold?.(false); } });
     s.on('progress', () => { if (this.role === 'caller') this.hooks.onState?.('Ringing…'); });
     s.on('accepted', () => this.onUp());
     s.on('confirmed', () => this.onUp());
@@ -86,6 +88,11 @@ class SipCall {
   hangup() { try { this.session.terminate(); } catch (e) {} this.finish('Call ended', this.connectedOnce ? 'answered' : 'cancelled'); }
   setMuted(m) { try { m ? this.session.mute({ audio: true }) : this.session.unmute({ audio: true }); } catch (e) {} }
   setCamera() {}
+  async hold(on) {
+    if (this.ended || !!this.held === on) return;
+    this.held = on;
+    try { on ? this.session.hold() : this.session.unhold(); } catch (e) {}
+  }
   async flipCamera() {}
   sendDTMF(d) { try { this.session.sendDTMF(d, { duration: 120, interToneGap: 70 }); } catch (e) {} }
   setStatus() { return Promise.resolve(); }

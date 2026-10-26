@@ -37,6 +37,63 @@ public class AudioRoutePlugin extends Plugin {
 
     private PowerManager.WakeLock proximity;
 
+    // ---------- normal (SIM) phone call while on a FitX call → hold / resume ----------
+    private Object modeListener;                       // AudioManager.OnModeChangedListener (API 31+)
+    private android.telephony.PhoneStateListener phoneListener; // older Android
+    private boolean phoneBusy = false;
+
+    private void onPhoneBusy(boolean busy) {
+        if (busy == phoneBusy) return;
+        phoneBusy = busy;
+        JSObject d = new JSObject();
+        d.put("state", busy ? "begin" : "end");
+        notifyListeners("interruption", d);
+    }
+
+    private void watchPhoneCalls(boolean on) {
+        AudioManager am = am();
+        if (Build.VERSION.SDK_INT >= 31) {
+            if (on && modeListener == null && am != null) {
+                AudioManager.OnModeChangedListener l = (mode) -> onPhoneBusy(
+                    mode == AudioManager.MODE_IN_CALL || mode == AudioManager.MODE_RINGTONE || mode == AudioManager.MODE_CALL_SCREENING
+                    || (Build.VERSION.SDK_INT >= 33 && mode == AudioManager.MODE_CALL_REDIRECT));
+                try { am.addOnModeChangedListener(getContext().getMainExecutor(), l); modeListener = l; } catch (Exception ignored) {}
+            } else if (!on && modeListener != null && am != null) {
+                try { am.removeOnModeChangedListener((AudioManager.OnModeChangedListener) modeListener); } catch (Exception ignored) {}
+                modeListener = null;
+            }
+        } else {
+            getActivity().runOnUiThread(() -> {
+                try {
+                    android.telephony.TelephonyManager tm = (android.telephony.TelephonyManager) getContext().getSystemService(Context.TELEPHONY_SERVICE);
+                    if (tm == null) return;
+                    if (on && phoneListener == null) {
+                        phoneListener = new android.telephony.PhoneStateListener() {
+                            @Override public void onCallStateChanged(int state, String number) {
+                                onPhoneBusy(state != android.telephony.TelephonyManager.CALL_STATE_IDLE);
+                            }
+                        };
+                        tm.listen(phoneListener, android.telephony.PhoneStateListener.LISTEN_CALL_STATE);
+                    } else if (!on && phoneListener != null) {
+                        tm.listen(phoneListener, android.telephony.PhoneStateListener.LISTEN_NONE);
+                        phoneListener = null;
+                    }
+                } catch (Exception ignored) {}
+            });
+        }
+        if (!on) phoneBusy = false;
+    }
+
+    /** Phone call finished: take the audio back for the FitX call. */
+    @PluginMethod
+    public void resumeAudio(PluginCall call) {
+        boolean speaker = call.getBoolean("speaker", false);
+        AudioManager am = am();
+        if (am != null) am.setMode(AudioManager.MODE_IN_COMMUNICATION);
+        call.getData().put("on", speaker);
+        setSpeaker(call);
+    }
+
     private AudioManager am() {
         return (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
     }
@@ -57,6 +114,7 @@ public class AudioRoutePlugin extends Plugin {
                 }
             } catch (Exception ignored) {}
         }
+        watchPhoneCalls(true);
         CallService.callPeer = call.getString("name", "FitX Call");
         CallService.callVideo = video;
         CallService.callStartedAt = 0;
@@ -101,6 +159,7 @@ public class AudioRoutePlugin extends Plugin {
         proximity = null;
         getActivity().runOnUiThread(() -> getActivity().getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON));
         CallNotifications.cancelIncoming(getContext());
+        watchPhoneCalls(false);
         CallService.callPeer = null; CallService.callStartedAt = 0;
         MainActivity.setPipAllowed(getActivity(), false);
         if (call.getBoolean("keepService", true)) CallService.start(getContext(), false);

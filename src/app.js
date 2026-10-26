@@ -679,6 +679,7 @@ function hooks() {
       }
     },
     onQuality: (q) => { $('c-quality').textContent = q; },
+    onPeerHold: () => renderHold(),
     onEnded: (why) => endUi(why),
   };
 }
@@ -785,8 +786,9 @@ function startTimerLabel() {
 }
 
 function openCallUi(peerName, type) {
-  muted = false; camOn = true;
-  $('b-mute').classList.remove('active'); $('b-cam').classList.remove('active');
+  muted = false; camOn = true; autoHeld = false;
+  $('b-mute').classList.remove('active'); $('b-cam').classList.remove('active'); $('b-hold').classList.remove('active');
+  $('c-hold').classList.add('hidden'); $('s-call').classList.remove('on-hold');
   $('local-video').style.visibility = 'visible';
   $('c-name').textContent = peerName; $('c-avatar').textContent = initials(peerName);
   $('c-quality').textContent = '';
@@ -835,6 +837,55 @@ function endUi(why) {
 }
 
 $('b-end').addEventListener('click', () => current?.hangup());
+
+// ----- Hold: manual button, and automatic while a normal phone call is going on -----
+let autoHeld = false;
+function renderHold() {
+  if (current) {
+    const mine = !!current.held, theirs = !!current.peerHeld;
+    $('b-hold').classList.toggle('active', mine);
+    $('b-hold').querySelector('span').textContent = mine ? 'Resume' : 'Hold';
+    const tag = mine ? (autoHeld ? '⏸ On hold — you are on a phone call' : '⏸ You put the call on hold')
+      : theirs ? `⏸ ${current.peer.name} put you on hold` : '';
+    $('c-hold').textContent = tag; $('c-hold').classList.toggle('hidden', !tag);
+    $('s-call').classList.toggle('on-hold', mine || theirs);
+  }
+  if (conf) {
+    $('cf-hold').textContent = conf.held ? '⏸ On hold — you are on a phone call' : '';
+    $('cf-hold').classList.toggle('hidden', !conf.held);
+    $('s-conf').classList.toggle('on-hold', !!conf.held);
+  }
+}
+function replayMedia() {
+  document.querySelectorAll('#s-call video, #s-call audio, #s-conf video, #s-conf audio, #mini-video').forEach((m) => { if (m.srcObject && m.paused) m.play().catch(() => {}); });
+}
+$('b-hold').addEventListener('click', async (e) => {
+  e.stopPropagation();
+  if (!current) return;
+  autoHeld = false;
+  await current.hold(!current.held, 'hold');
+  if (!current.held) replayMedia();
+  renderHold();
+});
+if (native) {
+  Native.addListener('interruption', async ({ state }) => {
+    if (state === 'begin') {
+      if (current && !current.held) { autoHeld = true; await current.hold(true, 'phone'); }
+      if (conf && !conf.held) { autoHeld = true; conf.setHeld(true); }
+      if (current || conf) toast('FitX call on hold while you are on a phone call', 3500);
+      renderHold();
+    } else if (state === 'end' && autoHeld) {
+      autoHeld = false;
+      await Native.resumeAudio({ speaker: current ? speakerOn : cfSpeaker }).catch(() => {});
+      if (current && current.held) await current.hold(false);
+      if (conf && conf.held) conf.setHeld(false);
+      replayMedia();
+      setTimeout(replayMedia, 1500);
+      if (current || conf) toast('FitX call resumed');
+      renderHold();
+    }
+  });
+}
 $('b-mute').addEventListener('click', () => { muted = !muted; current?.setMuted(muted); $('b-mute').classList.toggle('active', muted); });
 $('b-speaker').addEventListener('click', () => setSpeaker(!speakerOn));
 $('b-cam').addEventListener('click', () => { camOn = !camOn; current?.setCamera(camOn); $('b-cam').classList.toggle('active', !camOn); $('local-video').style.visibility = camOn ? 'visible' : 'hidden'; });
@@ -1231,6 +1282,7 @@ function renderConf(c) {
   const inCall = 1 + (d.joined || []).filter((u) => u !== me.uid).length + ext.filter((x) => x.status === 'connected').length;
   $('conf-title').textContent = `Group ${isVideo ? 'video' : 'voice'} call · ${inCall} in call`;
   $('cf-end').querySelector('span').textContent = c.isHost ? 'End' : 'Leave';
+  renderHold();
 }
 $('conf-grid').addEventListener('click', (e) => { const b = e.target.closest('[data-leg]'); if (b && conf) conf.hangupLeg(b.dataset.leg); });
 

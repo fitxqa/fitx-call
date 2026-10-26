@@ -266,8 +266,16 @@ export class Conference {
   // ---------------- controls ----------------
   setMuted(on) {
     this.muted = on;
-    this.local.getAudioTracks().forEach((t) => { t.enabled = !on; });
-    if (this.mixer) this.mixer.micGain.gain.value = on ? 0 : 1;
+    const off = on || this.held;
+    this.local.getAudioTracks().forEach((t) => { t.enabled = !off; });
+    if (this.mixer) this.mixer.micGain.gain.value = off ? 0 : 1;
+  }
+  /** On hold (e.g. a normal phone call came in): mic/camera off, connections kept. */
+  setHeld(on) {
+    this.held = on;
+    this.setMuted(this.muted);
+    this.local.getVideoTracks().forEach((t) => { t.enabled = !on && this.camOn; });
+    this.emit();
   }
   setCamera(on) { this.camOn = on; this.local.getVideoTracks().forEach((t) => { t.enabled = on; }); }
 
