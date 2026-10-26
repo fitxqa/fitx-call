@@ -24,7 +24,10 @@ const VERSION = '1.1';
 
 // ---------- UI helpers ----------
 const screens = ['s-loading', 's-setup', 's-login', 's-main', 's-chat', 's-incoming', 's-call', 's-conf'];
-function show(id) { screens.forEach((s) => $(s).classList.toggle('hidden', s !== id)); }
+function show(id) {
+  screens.forEach((s) => $(s).classList.toggle('hidden', s !== id));
+  if (typeof updateCallBar === 'function') updateCallBar(id);
+}
 let toastT;
 function toast(msg, ms = 2600) {
   const t = $('toast'); t.textContent = msg; t.classList.add('show');
@@ -769,6 +772,7 @@ window.addEventListener('resize', () => { if (smallPos && $('s-call').classList.
 if (native) {
   Native.addListener('hangup', () => { if (current) current.hangup(); });
   Native.addListener('pip', ({ active }) => {
+    if (active && current && $('s-call').classList.contains('hidden')) restoreCall();
     document.body.classList.toggle('pip', !!active);
     if (!active && smallPos) setTimeout(() => placeSmall(smallPos), 300);
   });
@@ -1001,6 +1005,52 @@ $('sip-enabled').addEventListener('change', (e) => {
 });
 $('opt-direct').addEventListener('change', (e) => setPref('directDial', e.target.checked));
 fillSipForm();
+
+// ---------- Use the app during a call (message, browse) ----------
+let callBarT = null;
+function onCallScreen(id) { return id === 's-call' || id === 's-conf' || id === 's-incoming'; }
+function minimizeCall() {
+  if (!current && !conf) return;
+  show(chat.isOpenAny() ? 's-chat' : 's-main');
+}
+function restoreCall() {
+  if (current) show('s-call'); else if (conf) show('s-conf');
+}
+function updateCallBar(id) {
+  const active = !!(current || conf);
+  const showBar = active && !onCallScreen(id) && !!me;
+  $('callbar').classList.toggle('hidden', !showBar);
+  document.body.classList.toggle('oncall', showBar);
+  // floating video of the other person while browsing during a 1:1 video call
+  const mv = $('mini-video');
+  const vid = showBar && current && current.type === 'video' && current.remote && current.remote.getVideoTracks().length;
+  if (vid) { if (mv.srcObject !== current.remote) mv.srcObject = current.remote; mv.play && mv.play().catch(() => {}); }
+  else if (mv.srcObject) mv.srcObject = null;
+  mv.classList.toggle('hidden', !vid);
+  clearInterval(callBarT);
+  if (showBar) { tickCallBar(); callBarT = setInterval(tickCallBar, 1000); }
+}
+function tickCallBar() {
+  let name = '', t0 = null;
+  if (current) { name = current.peer ? current.peer.name : 'Call'; t0 = current.startedAt; }
+  else if (conf) { name = 'Group call'; t0 = conf.startedAt; }
+  else return updateCallBar('');
+  $('callbar-text').textContent = `${name} · ${t0 ? fmtDur(Math.round((Date.now() - t0) / 1000)) : 'Calling…'} — tap to return`;
+}
+$('callbar').addEventListener('click', restoreCall);
+$('mini-video').addEventListener('click', restoreCall);
+$('b-min').addEventListener('click', (e) => { e.stopPropagation(); minimizeCall(); });
+$('cf-min').addEventListener('click', minimizeCall);
+$('b-msg').addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (!current || current.kind === 'sip') return;
+  const u = users.find((x) => x.uid === current.peer.uid) || current.peer;
+  chat.openWith({ uid: u.uid, name: u.name });
+});
+$('cf-msg').addEventListener('click', () => {
+  show('s-main');
+  document.querySelector('.tabs button[data-tab="chats"]').click();
+});
 
 // ---------- Group calls (conference) ----------
 let conf = null, confIncoming = null, pendingConf = null, confTimer = null, cfMuted = false, cfSpeaker = true, cfCam = true;
@@ -1355,7 +1405,15 @@ if (native) {
   App.addListener('appUrlOpen', (e) => handleLink(e.url));
   App.getLaunchUrl().then((r) => r && handleLink(r.url)).catch(() => {});
   App.addListener('backButton', () => {
-    if (current || incoming || sipIncoming || conf || confIncoming) { if (!$('picker').classList.contains('hidden')) closePicker(); return; } // never leave a call by accident
+    if (incoming || sipIncoming || confIncoming) return; // ringing: answer or decline
+    if (current || conf) {                                  // in a call: back never hangs up
+      if (!$('picker').classList.contains('hidden')) return closePicker();
+      if (!$('dtmf').classList.contains('hidden')) return $('dtmf').classList.add('hidden');
+      if (!$('s-call').classList.contains('hidden') || !$('s-conf').classList.contains('hidden')) return minimizeCall();
+      if (chat.viewerOpen()) return chat.closeViewer();
+      if (chat.isOpen()) return chat.close();
+      return restoreCall();
+    }
     if (!$('dtmf').classList.contains('hidden')) { $('dtmf').classList.add('hidden'); return; }
     if (chat.viewerOpen()) return chat.closeViewer();
     if (chat.isOpen()) return chat.close();

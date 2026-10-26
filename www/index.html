@@ -294,6 +294,7 @@
   <!-- Incoming call -->
   <!-- Conference -->
   <section id="s-conf" class="screen call hidden">
+    <button class="call-min" id="cf-min" aria-label="Minimise call — use the app"><svg><use href="#i-back"/></svg></button>
     <div class="conf-head">
       <b id="conf-title">Group call</b>
       <span id="conf-time">Connecting…</span>
@@ -304,6 +305,7 @@
       <button class="round dark" id="cf-speaker"><svg><use href="#i-speaker"/></svg><span>Speaker</span></button>
       <button class="round dark cf-vid" id="cf-cam"><svg><use href="#i-video"/></svg><span>Camera</span></button>
       <button class="round dark" id="cf-add"><svg><use href="#i-add"/></svg><span>Add</span></button>
+      <button class="round dark" id="cf-msg"><svg><use href="#i-chat"/></svg><span>Chats</span></button>
       <button class="round red" id="cf-end"><svg><use href="#i-end"/></svg><span>Leave</span></button>
     </div>
   </section>
@@ -348,6 +350,7 @@
     <audio id="remote-audio" autoplay></audio>
     <video id="local-video" autoplay playsinline muted></video>
     <div class="swap-hint" id="swap-hint">Drag to move · tap to swap</div>
+    <button class="call-min" id="b-min" aria-label="Minimise call — use the app"><svg><use href="#i-back"/></svg></button>
     <div class="call-info" id="call-info">
       <div class="avatar xl" id="c-avatar"></div>
       <h2 id="c-name"></h2>
@@ -357,6 +360,7 @@
     <div class="call-actions">
       <button class="round dark" id="b-mute"><svg><use href="#i-mic"/></svg><span>Mute</span></button>
       <button class="round dark" id="b-speaker"><svg><use href="#i-speaker"/></svg><span>Speaker</span></button>
+      <button class="round dark app-only" id="b-msg"><svg><use href="#i-chat"/></svg><span>Message</span></button>
       <button class="round dark sip-only" id="b-keys"><svg><use href="#i-dialpad"/></svg><span>Keypad</span></button>
       <button class="round dark vid-only" id="b-cam"><svg><use href="#i-video"/></svg><span>Camera</span></button>
       <button class="round dark vid-only" id="b-flip"><svg><use href="#i-cam"/></svg><span>Flip</span></button>
@@ -388,6 +392,9 @@
       </div>
     </form>
   </div>
+
+  <button id="callbar" class="callbar hidden" type="button"><span class="pulse-dot"></span><span id="callbar-text">On call</span></button>
+  <video id="mini-video" class="mini-video hidden" autoplay playsinline muted></video>
 
   <div id="toast" class="toast"></div>
 

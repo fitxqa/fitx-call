@@ -326,3 +326,17 @@ body.pip #local-video { display: none !important; }
 .pk-actions { display: flex; gap: 10px; padding-top: 12px; }
 .pk-actions .btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .pk-actions svg { width: 18px; height: 18px; }
+
+/* ===== Use the app during a call ===== */
+.call-min { position: absolute; top: calc(10px + var(--safe-t)); left: 10px; z-index: 8; width: 42px; height: 42px; border-radius: 50%; border: 0;
+  background: rgba(0,0,0,.35); color: #fff; display: grid; place-items: center; }
+.call-min svg { width: 22px; height: 22px; transform: rotate(-90deg); }
+.call.controls-hidden .call-min { opacity: 0; pointer-events: none; }
+.call.is-sip .app-only { display: none; }
+.callbar { position: fixed; top: 0; left: 0; right: 0; z-index: 70; border: 0; background: #17a957; color: #fff; font: 600 14px/1.2 system-ui, sans-serif;
+  padding: calc(var(--safe-t) + 8px) 16px 9px; display: flex; align-items: center; justify-content: center; gap: 8px; }
+.callbar .pulse-dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; animation: blink 1.2s infinite; }
+body.oncall #s-main, body.oncall #s-chat { padding-top: calc(var(--safe-t) + 38px); }
+.mini-video { position: fixed; right: 12px; bottom: calc(76px + var(--safe-b)); width: 110px; aspect-ratio: 3/4; object-fit: cover; z-index: 69;
+  border-radius: 14px; border: 2px solid rgba(255,255,255,.35); box-shadow: 0 8px 24px rgba(0,0,0,.5); background: #000; }
+#s-chat:not(.hidden) ~ .mini-video, body.in-chat .mini-video { bottom: calc(80px + var(--safe-b)); }
