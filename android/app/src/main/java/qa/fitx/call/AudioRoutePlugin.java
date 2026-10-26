@@ -24,6 +24,17 @@ import java.util.List;
 @CapacitorPlugin(name = "AudioRoute")
 public class AudioRoutePlugin extends Plugin {
 
+    private static AudioRoutePlugin instance;
+
+    @Override
+    public void load() { instance = this; }
+
+    /** Send an event to the web app (if it is running). */
+    static void emit(String event, JSObject data) {
+        AudioRoutePlugin p = instance;
+        if (p != null) p.notifyListeners(event, data);
+    }
+
     private PowerManager.WakeLock proximity;
 
     private AudioManager am() {
@@ -46,7 +57,10 @@ public class AudioRoutePlugin extends Plugin {
                 }
             } catch (Exception ignored) {}
         }
-        if (CallService.running) CallService.start(getContext(), true);
+        CallService.callPeer = call.getString("name", "FitX Call");
+        CallService.callVideo = video;
+        CallService.callStartedAt = 0;
+        CallService.start(getContext(), true);   // ongoing-call notification (timer + End call)
         call.resolve();
     }
 
@@ -87,7 +101,10 @@ public class AudioRoutePlugin extends Plugin {
         proximity = null;
         getActivity().runOnUiThread(() -> getActivity().getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON));
         CallNotifications.cancelIncoming(getContext());
-        if (CallService.running) CallService.start(getContext(), false);
+        CallService.callPeer = null; CallService.callStartedAt = 0;
+        MainActivity.setPipAllowed(getActivity(), false);
+        if (call.getBoolean("keepService", true)) CallService.start(getContext(), false);
+        else CallService.stop(getContext());
         call.resolve();
     }
 
@@ -234,6 +251,20 @@ public class AudioRoutePlugin extends Plugin {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             getContext().startActivity(i);
         } catch (Exception e) { openAppSettings(); }
+        call.resolve();
+    }
+
+    // ---------- in-call: notification timer + picture-in-picture ----------
+    @PluginMethod
+    public void callConnected(PluginCall call) {
+        CallService.callStartedAt = call.getLong("startedAt", System.currentTimeMillis());
+        CallService.start(getContext(), true);
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void setPip(PluginCall call) {
+        MainActivity.setPipAllowed(getActivity(), call.getBoolean("enabled", false));
         call.resolve();
     }
 

@@ -660,7 +660,12 @@ function hooks() {
       Tone.stop();
       current.startedAt = Date.now();
       startTimerLabel();
-      if (current.type === 'video') { $('s-call').classList.add('video-on'); armHide(); }
+      if (native) Native.callConnected({ startedAt: current.startedAt }).catch(() => {});
+      if (current.type === 'video') {
+        $('s-call').classList.add('video-on'); armHide();
+        if (native) Native.setPip({ enabled: true }).catch(() => {});
+        $('swap-hint').classList.add('show'); setTimeout(() => $('swap-hint').classList.remove('show'), 3500);
+      }
     },
     onQuality: (q) => { $('c-quality').textContent = q; },
     onEnded: (why) => endUi(why),
@@ -672,14 +677,94 @@ let hideT = null;
 function armHide() {
   clearTimeout(hideT);
   $('s-call').classList.remove('controls-hidden');
+  if (typeof placeSmall === 'function' && smallPos) requestAnimationFrame(() => placeSmall(smallPos));
   if ($('s-call').classList.contains('video-on')) hideT = setTimeout(() => $('s-call').classList.add('controls-hidden'), 4000);
 }
 $('s-call').addEventListener('click', (e) => {
   if (!$('s-call').classList.contains('video-on')) return;
+  if (e.target.classList && e.target.classList.contains('vsmall')) return;
+  if (Date.now() - lastVideoTap < 450) return; // the tap that just moved/swapped the small video
   if (e.target.closest('button')) { armHide(); return; }
   if ($('s-call').classList.contains('controls-hidden')) armHide();
   else { clearTimeout(hideT); $('s-call').classList.add('controls-hidden'); }
 });
+
+// ----- Movable self-view: drag anywhere (snaps to a corner), tap to swap big/small -----
+const vids = () => [$('local-video'), $('remote-video')];
+let swapped = false, smallPos = null;
+function resetVideoLayout(isVideo) {
+  swapped = false; smallPos = null;
+  vids().forEach((v) => { v.classList.remove('vsmall', 'vbig', 'snap', 'dragging'); v.style.left = ''; v.style.top = ''; });
+  if (!isVideo) return;
+  $('local-video').classList.add('vsmall'); $('remote-video').classList.add('vbig');
+  requestAnimationFrame(() => placeSmall(null));
+}
+function smallEl() { return swapped ? $('remote-video') : $('local-video'); }
+function bounds(el) {
+  const W = innerWidth, H = innerHeight, w = el.offsetWidth || 120, h = el.offsetHeight || 160;
+  const safeT = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-t')) || 0;
+  const acts = document.querySelector('#s-call .call-actions');
+  const hidden = document.querySelector('#s-call.controls-hidden');
+  const bottomLimit = !hidden && acts ? acts.getBoundingClientRect().top - 12 : H - 24;
+  return { W, H, w, h, minX: 12, maxX: W - w - 12, minY: 12 + safeT, maxY: Math.max(12 + safeT, bottomLimit - h) };
+}
+function placeSmall(pos) {
+  const el = smallEl(), b = bounds(el);
+  const p = pos || smallPos || { x: b.maxX, y: b.minY };   // default: top-right
+  const x = Math.min(Math.max(b.minX, p.x), b.maxX), y = Math.min(Math.max(b.minY, p.y), b.maxY);
+  el.style.left = x + 'px'; el.style.top = y + 'px';
+  smallPos = { x, y };
+}
+function snapSmall() {
+  const el = smallEl(), b = bounds(el);
+  const cx = (smallPos.x + b.w / 2) < b.W / 2 ? b.minX : b.maxX;
+  const cy = (smallPos.y + b.h / 2) < b.H / 2 ? b.minY : b.maxY;
+  el.classList.add('snap'); placeSmall({ x: cx, y: cy });
+  setTimeout(() => el.classList.remove('snap'), 260);
+}
+function swapVideos() {
+  swapped = !swapped;
+  const sm = smallEl(), bg = swapped ? $('local-video') : $('remote-video');
+  bg.classList.remove('vsmall'); bg.classList.add('vbig'); bg.style.left = ''; bg.style.top = '';
+  sm.classList.remove('vbig'); sm.classList.add('vsmall');
+  placeSmall(smallPos);
+}
+let drag = null, lastVideoTap = 0;
+vids().forEach((v) => {
+  v.addEventListener('pointerdown', (e) => {
+    if (!v.classList.contains('vsmall')) return;
+    e.stopPropagation();
+    drag = { el: v, sx: e.clientX, sy: e.clientY, ox: smallPos ? smallPos.x : v.offsetLeft, oy: smallPos ? smallPos.y : v.offsetTop, moved: false };
+    try { v.setPointerCapture(e.pointerId); } catch (x) {}
+    v.classList.add('dragging');
+  });
+  v.addEventListener('pointermove', (e) => {
+    if (!drag || drag.el !== v) return;
+    const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+    if (!drag.moved && Math.hypot(dx, dy) < 8) return;
+    drag.moved = true;
+    placeSmall({ x: drag.ox + dx, y: drag.oy + dy });
+  });
+  const end = (e) => {
+    if (!drag || drag.el !== v) return;
+    const moved = drag.moved; drag = null; v.classList.remove('dragging'); lastVideoTap = Date.now();
+    if (e && e.type === 'pointercancel') { snapSmall(); return; }
+    if (moved) snapSmall(); else swapVideos();
+    if ($('s-call').classList.contains('video-on')) armHide();
+  };
+  v.addEventListener('pointerup', end);
+  v.addEventListener('pointercancel', end);
+});
+window.addEventListener('resize', () => { if (smallPos && $('s-call').classList.contains('is-video') && !document.body.classList.contains('pip')) placeSmall(smallPos); });
+
+// Native events: notification "End call" button, and picture-in-picture on/off
+if (native) {
+  Native.addListener('hangup', () => { if (current) current.hangup(); });
+  Native.addListener('pip', ({ active }) => {
+    document.body.classList.toggle('pip', !!active);
+    if (!active && smallPos) setTimeout(() => placeSmall(smallPos), 300);
+  });
+}
 
 function startTimerLabel() {
   clearInterval(callTimer);
@@ -697,7 +782,8 @@ function openCallUi(peerName, type) {
   $('s-call').classList.remove('video-on', 'controls-hidden', 'is-sip'); clearTimeout(hideT);
   $('local-video').classList.remove('back');
   show('s-call');
-  if (native) Native.startCall({ video: type === 'video' }).catch(() => {});
+  if (native) Native.startCall({ video: type === 'video', name: peerName }).catch(() => {});
+  resetVideoLayout(type === 'video');
   setSpeaker(type === 'video' || pref('speakerDefault', false));
 }
 
@@ -726,7 +812,8 @@ function endUi(why) {
   const s = current;
   Tone.stop();
   clearInterval(callTimer);
-  if (native) Native.endCall().catch(() => {});
+  if (native) Native.endCall({ keepService: pref('ringClosed', true) }).catch(() => {});
+  document.body.classList.remove('pip');
   $('remote-video').srcObject = null; $('remote-audio').srcObject = null; $('local-video').srcObject = null;
   current = null;
   $('dtmf').classList.add('hidden'); $('s-call').classList.remove('is-sip');

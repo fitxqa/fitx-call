@@ -23,6 +23,11 @@ public class CallService extends Service {
     static final int ID_SERVICE = 7000;
     static volatile boolean running = false;
 
+    // Current call shown in the notification (null = no call)
+    static volatile String callPeer = null;
+    static volatile long callStartedAt = 0;   // 0 = still calling / ringing
+    static volatile boolean callVideo = false;
+
     static void start(Context ctx, boolean inCall) {
         Intent i = new Intent(ctx, CallService.class).putExtra("inCall", inCall);
         try {
@@ -41,16 +46,41 @@ public class CallService extends Service {
         ensureChannel();
         Intent open = new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent pi = PendingIntent.getActivity(this, 10, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        Notification n = new NotificationCompat.Builder(this, CH_SERVICE)
-            .setSmallIcon(android.R.drawable.sym_action_call)
-            .setContentTitle(inCall ? "FitX Call — on a call" : "FitX Call")
-            .setContentText(inCall ? "Tap to return to the call" : (NativeWatcher.signedIn() ? "Ready to receive calls" : "Open the app to finish setup"))
-            .setColor(0xFFFF6A13)
-            .setOngoing(true)
-            .setSilent(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setContentIntent(pi)
-            .build();
+        Notification n;
+        if (inCall) {
+            String who = callPeer != null ? callPeer : "FitX Call";
+            Intent hang = new Intent(this, HangupReceiver.class).setAction("qa.fitx.call.HANGUP");
+            PendingIntent hangPi = PendingIntent.getBroadcast(this, 11, hang, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            NotificationCompat.Builder b = new NotificationCompat.Builder(this, CH_SERVICE)
+                .setSmallIcon(callVideo ? android.R.drawable.presence_video_online : android.R.drawable.sym_action_call)
+                .setContentTitle(who)
+                .setContentText(callStartedAt > 0 ? (callVideo ? "FitX video call — tap to return" : "FitX call — tap to return") : "Calling…")
+                .setColor(0xFFFF6A13)
+                .setOngoing(true)
+                .setSilent(true)
+                .setCategory(NotificationCompat.CATEGORY_CALL)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setContentIntent(pi);
+            if (callStartedAt > 0) b.setUsesChronometer(true).setWhen(callStartedAt).setShowWhen(true);
+            try {
+                androidx.core.app.Person person = new androidx.core.app.Person.Builder().setName(who).setImportant(true).build();
+                b.setStyle(NotificationCompat.CallStyle.forOngoingCall(person, hangPi));
+            } catch (Exception e) {
+                b.addAction(0, "End call", hangPi);
+            }
+            n = b.build();
+        } else {
+            n = new NotificationCompat.Builder(this, CH_SERVICE)
+                .setSmallIcon(android.R.drawable.sym_action_call)
+                .setContentTitle("FitX Call")
+                .setContentText(NativeWatcher.signedIn() ? "Ready to receive calls" : "Open the app to finish setup")
+                .setColor(0xFFFF6A13)
+                .setOngoing(true)
+                .setSilent(true)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setContentIntent(pi)
+                .build();
+        }
         int type = 0;
         if (Build.VERSION.SDK_INT >= 34) {
             type = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE;

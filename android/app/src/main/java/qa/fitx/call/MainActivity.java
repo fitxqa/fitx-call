@@ -13,6 +13,38 @@ public class MainActivity extends BridgeActivity {
 
     /** True while the app is on screen — then the web app rings itself instead of a notification. */
     public static volatile boolean inForeground = false;
+    private static volatile boolean pipAllowed = false;
+
+    /** Video call in progress → leaving the app shrinks it to a floating window. */
+    static void setPipAllowed(android.app.Activity a, boolean on) {
+        pipAllowed = on;
+        if (a == null || Build.VERSION.SDK_INT < 31) return;
+        a.runOnUiThread(() -> {
+            try {
+                a.setPictureInPictureParams(new android.app.PictureInPictureParams.Builder()
+                    .setAspectRatio(new android.util.Rational(9, 16)).setAutoEnterEnabled(on).setSeamlessResizeEnabled(true).build());
+            } catch (Exception ignored) {}
+        });
+    }
+
+    @Override
+    protected void onUserLeaveHint() {
+        super.onUserLeaveHint();
+        if (pipAllowed && Build.VERSION.SDK_INT >= 26 && Build.VERSION.SDK_INT < 31) {
+            try {
+                enterPictureInPictureMode(new android.app.PictureInPictureParams.Builder()
+                    .setAspectRatio(new android.util.Rational(9, 16)).build());
+            } catch (Exception ignored) {}
+        }
+    }
+
+    @Override
+    public void onPictureInPictureModeChanged(boolean isInPip, android.content.res.Configuration cfg) {
+        super.onPictureInPictureModeChanged(isInPip, cfg);
+        com.getcapacitor.JSObject d = new com.getcapacitor.JSObject();
+        d.put("active", isInPip);
+        AudioRoutePlugin.emit("pip", d);
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
