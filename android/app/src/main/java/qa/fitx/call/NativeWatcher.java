@@ -20,7 +20,8 @@ import java.util.Map;
  */
 final class NativeWatcher {
 
-    private static ListenerRegistration callReg, chatReg;
+    private static ListenerRegistration callReg, chatReg, confReg;
+    private static final Map<String, String[]> confRinging = new HashMap<>();
     private static String watchingUid = null;
     private static final Map<String, Long> chatLast = new HashMap<>();
     private static final Map<String, String[]> ringing = new HashMap<>(); // callId -> {fromName, type}
@@ -84,6 +85,28 @@ final class NativeWatcher {
                 }
             });
 
+        // ----- Group-call invites -----
+        confReg = fs.collection("confs").whereArrayContains("invited", uid)
+            .addSnapshotListener((snap, err) -> {
+                if (snap == null) return;
+                for (DocumentChange dc : snap.getDocumentChanges()) {
+                    DocumentSnapshot d = dc.getDocument();
+                    String id = "conf:" + d.getId();
+                    if (dc.getType() == DocumentChange.Type.ADDED) {
+                        Long created = d.getLong("createdAtMs");
+                        if (!"active".equals(str(d.get("status"), "")) || (created != null && System.currentTimeMillis() - created > 3L * 3600000)) continue;
+                        String host = str(d.get("hostName"), "FitX") + " (group)";
+                        String type = str(d.get("type"), "audio");
+                        confRinging.put(id, new String[] { host, type });
+                        if (!MainActivity.inForeground) CallNotifications.showIncoming(app, id, host, type);
+                    } else if (dc.getType() == DocumentChange.Type.REMOVED) {
+                        String[] r = confRinging.remove(id);
+                        CallNotifications.cancelIncoming(app);
+                        if (r != null && !MainActivity.inForeground) CallNotifications.showMissed(app, id, r[0], r[1]);
+                    }
+                }
+            });
+
         // ----- New messages -----
         firstChats = true;
         chatLast.clear();
@@ -110,7 +133,9 @@ final class NativeWatcher {
     static synchronized void stop() {
         if (callReg != null) callReg.remove();
         if (chatReg != null) chatReg.remove();
-        callReg = null; chatReg = null; watchingUid = null;
+        if (confReg != null) confReg.remove();
+        callReg = null; chatReg = null; confReg = null; watchingUid = null;
+        confRinging.clear();
         ringing.clear();
     }
 

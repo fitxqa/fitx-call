@@ -7,13 +7,14 @@ import {
 } from 'firebase/auth';
 import {
   initializeFirestore, writeBatch, doc, getDoc, setDoc, updateDoc, deleteDoc, collection, query, where, orderBy, limit,
-  onSnapshot, serverTimestamp,
+  onSnapshot, serverTimestamp, arrayRemove,
 } from 'firebase/firestore';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { CallSession } from './call.js';
 import { createChat } from './chat.js';
 import { SipPhone, loadSip, saveSip } from './sip.js';
+import { Conference, MAX_VOICE, MAX_VIDEO } from './conf.js';
 
 const CFG = window.FITX_CONFIG || {};
 const $ = (id) => document.getElementById(id);
@@ -22,7 +23,7 @@ const Native = registerPlugin('AudioRoute');
 const VERSION = '1.1';
 
 // ---------- UI helpers ----------
-const screens = ['s-loading', 's-setup', 's-login', 's-main', 's-chat', 's-incoming', 's-call'];
+const screens = ['s-loading', 's-setup', 's-login', 's-main', 's-chat', 's-incoming', 's-call', 's-conf'];
 function show(id) { screens.forEach((s) => $(s).classList.toggle('hidden', s !== id)); }
 let toastT;
 function toast(msg, ms = 2600) {
@@ -292,6 +293,7 @@ async function onLogin(user) {
   chat.start();
   sip.start();
   watchIncoming();
+  watchConfInvites();
   watchRecents();
   if (me.role === 'admin') watchAdmin();
   ping();
@@ -500,6 +502,12 @@ function watchRecents() {
 function renderRecents(all) {
   $('recents').innerHTML = all.length ? all.map((c) => {
     const out = c.dir === 'out';
+    if (c.type === 'conf') {
+      return `<li>
+        <div class="avatar"><svg style="width:22px;height:22px"><use href="#i-group"/></svg></div>
+        <div class="who"><b>${esc(c.peerName || 'Group call')}</b><small class="dir">${out ? '↗' : '↙'} Group ${c.media === 'video' ? 'video' : 'voice'} call${c.duration ? ' · ' + fmtDur(c.duration) : ''} · ${ago(c.createdAtMs)}</small></div>
+      </li>`;
+    }
     if (c.type === 'sip' || c.type === 'phone') {
       const num = c.number || String(c.peerUid || '').replace(/^tel:/, '');
       const miss = !out && ['missed', 'cancelled'].includes(c.status);
@@ -834,7 +842,7 @@ $('b-flip').addEventListener('click', async () => {
 // ---------- Dial pad: SIP + phone (SIM) dialer ----------
 let sipIncoming = null;
 const sip = new SipPhone({
-  isBusy: () => !!current || !!incoming || !!sipIncoming,
+  isBusy: () => !!current || !!incoming || !!sipIncoming || !!conf || !!confIncoming,
   onStatus: (state, text) => {
     $('dp-status').className = 'dp-status ' + state;
     $('sip-state').textContent = state === 'off' && !loadSip().user ? 'SIP not set up — tap to set up' : text;
@@ -994,6 +1002,261 @@ $('sip-enabled').addEventListener('change', (e) => {
 $('opt-direct').addEventListener('change', (e) => setPref('directDial', e.target.checked));
 fillSipForm();
 
+// ---------- Group calls (conference) ----------
+let conf = null, confIncoming = null, pendingConf = null, confTimer = null, cfMuted = false, cfSpeaker = true, cfCam = true;
+const confCtx = () => ({ db, me, sip, toast, onUpdate: renderConf, onEnded: endConfUi });
+
+// People picker
+let pk = { mode: 'create', sel: new Set() };
+function openPicker(mode) {
+  pk = { mode, sel: new Set() };
+  const adding = mode === 'add';
+  $('pk-title').textContent = adding ? 'Add to group call' : 'Start a group call';
+  $('pk-voice').classList.toggle('hidden', adding);
+  $('pk-video').classList.toggle('hidden', adding);
+  $('pk-invite').classList.toggle('hidden', !adding);
+  $('pk-tabs').classList.toggle('hidden', !(adding && conf && conf.isHost));
+  showPkTab('team');
+  $('pk-number').value = '';
+  renderPicker();
+  $('picker').classList.remove('hidden');
+}
+function closePicker() { $('picker').classList.add('hidden'); }
+function showPkTab(t) {
+  document.querySelectorAll('#pk-tabs [data-pt]').forEach((b) => b.classList.toggle('on', b.dataset.pt === t));
+  $('pk-team').classList.toggle('hidden', t !== 'team');
+  $('pk-phone').classList.toggle('hidden', t !== 'phone');
+  $('pk-actions').classList.toggle('hidden', t !== 'team');
+}
+function pickerLimit() {
+  if (pk.mode === 'add' && conf) {
+    const max = conf.type === 'video' ? MAX_VIDEO : MAX_VOICE;
+    return Math.max(0, max - (conf.data.joined || []).length - (conf.data.invited || []).length - conf.legs.size);
+  }
+  return MAX_VOICE - 1;
+}
+function renderPicker() {
+  const taken = new Set(pk.mode === 'add' && conf ? [...(conf.data.joined || []), ...(conf.data.invited || [])] : []);
+  const list = users.filter((u) => !taken.has(u.uid)).sort((a, b) => (isOnline(b) - isOnline(a)) || (a.name || '').localeCompare(b.name || ''));
+  const lim = pickerLimit();
+  $('pk-hint').textContent = pk.mode === 'add'
+    ? (lim ? `You can add ${lim} more.` : 'The group call is full.')
+    : `Pick up to ${MAX_VOICE - 1} people for voice, or ${MAX_VIDEO - 1} for video.`;
+  $('pk-list').innerHTML = list.length ? list.map((u) => {
+    const sel = pk.sel.has(u.uid);
+    const off = !sel && pk.sel.size >= lim;
+    return `<li data-pk="${u.uid}" class="${sel ? 'sel' : ''} ${off ? 'off' : ''}">
+      <div class="avatar ${isOnline(u) ? 'on' : ''}">${esc(initials(u.name))}</div>
+      <div class="who"><b>${esc(u.name)}</b><small>${esc(u.department || '@' + u.username)}${isOnline(u) ? ' · online' : ''}</small></div>
+      <span class="ck">${sel ? '✓' : ''}</span></li>`;
+  }).join('') : '<li class="empty">Nobody else to add</li>';
+  $('pk-voice').textContent = ''; $('pk-voice').innerHTML = `<svg><use href="#i-phone"/></svg> Voice${pk.sel.size ? ` (${pk.sel.size + 1})` : ''}`;
+  $('pk-video').innerHTML = `<svg><use href="#i-video"/></svg> Video${pk.sel.size ? ` (${pk.sel.size + 1})` : ''}`;
+  $('pk-invite').textContent = pk.sel.size ? `Add ${pk.sel.size} to call` : 'Add to call';
+}
+$('pk-list').addEventListener('click', (e) => {
+  const li = e.target.closest('[data-pk]'); if (!li) return;
+  const id = li.dataset.pk;
+  if (pk.sel.has(id)) pk.sel.delete(id); else pk.sel.add(id);
+  renderPicker();
+});
+$('pk-tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-pt]'); if (b) showPkTab(b.dataset.pt); });
+$('pk-close').addEventListener('click', closePicker);
+$('picker').addEventListener('click', (e) => { if (e.target.id === 'picker') closePicker(); });
+$('group-btn').addEventListener('click', () => {
+  if (current || conf) return toast('You are already in a call');
+  openPicker('create');
+});
+const pickedUsers = () => users.filter((u) => pk.sel.has(u.uid));
+$('pk-voice').addEventListener('click', () => startConf('audio'));
+$('pk-video').addEventListener('click', () => startConf('video'));
+$('pk-invite').addEventListener('click', async () => {
+  if (!conf || !pk.sel.size) return;
+  try { await conf.invite(pickedUsers()); closePicker(); toast('Calling…'); } catch (e) { toast(e.message || 'Could not add'); }
+});
+$('pk-dial').addEventListener('click', async () => {
+  const num = cleanNum($('pk-number').value);
+  if (!num) return toast('Enter a phone number');
+  try { await conf.addNumber(num); closePicker(); toast(`Calling ${num}…`); } catch (e) { toast(e.message || 'Could not call', 3500); }
+});
+
+async function startConf(type) {
+  const inv = pickedUsers();
+  if (!inv.length) return toast('Pick at least one person');
+  if (type === 'video' && inv.length > MAX_VIDEO - 1) return toast(`Video group calls: max ${MAX_VIDEO} people (you + ${MAX_VIDEO - 1})`, 3500);
+  if (!navigator.onLine) return toast('No internet connection');
+  closePicker();
+  openConfUi(type, 'Group call');
+  try { conf = await Conference.create(confCtx(), { type, invitees: inv }); confJoined(); }
+  catch (e) { console.warn(e); endConfUi(e && e.name === 'NotAllowedError' ? 'Allow microphone/camera permission' : (e.message || 'Could not start the group call')); }
+}
+async function joinConf(id) {
+  openConfUi('audio', 'Joining…');
+  try { const c = new Conference(confCtx(), id); conf = c; await c.join(); $('s-conf').classList.toggle('cf-video', c.type === 'video'); confJoined(); }
+  catch (e) { conf = null; endConfUi(e && e.name === 'NotAllowedError' ? 'Allow microphone/camera permission' : (e.message || 'Could not join')); }
+}
+function openConfUi(type, title) {
+  cfMuted = false; cfCam = true; cfSpeaker = true;
+  $('cf-mute').classList.remove('active'); $('cf-cam').classList.remove('active'); $('cf-speaker').classList.add('active');
+  $('s-conf').classList.toggle('cf-video', type === 'video');
+  $('conf-title').textContent = title;
+  $('conf-time').textContent = 'Connecting…';
+  $('conf-grid').innerHTML = '';
+  tiles.clear();
+  show('s-conf');
+  if (native) { Native.startCall({ video: type === 'video', name: 'FitX group call' }).catch(() => {}); Native.setSpeaker({ on: true }).catch(() => {}); }
+}
+function confJoined() {
+  if (!conf) return;
+  if (native) Native.callConnected({ startedAt: conf.startedAt }).catch(() => {});
+  clearInterval(confTimer);
+  confTimer = setInterval(() => { if (conf && conf.startedAt) $('conf-time').textContent = fmtDur(Math.round((Date.now() - conf.startedAt) / 1000)); }, 1000);
+  renderConf(conf);
+}
+
+// Tiles (kept between renders so videos don't flicker)
+const tiles = new Map();
+function tileFor(key, build) {
+  let t = tiles.get(key);
+  if (!t) { t = build(); tiles.set(key, t); }
+  return t;
+}
+function mediaTile(key, name, stream, { me: isMe = false, video = false } = {}) {
+  const t = tileFor(key, () => {
+    const el = document.createElement('div'); el.className = 'tile';
+    el.innerHTML = `<div class="avatar">${esc(initials(name))}</div><div class="nm"></div><div class="st"></div>`;
+    if (video) { const v = document.createElement('video'); v.autoplay = true; v.playsInline = true; v.muted = isMe; if (isMe) v.className = 'me'; el.prepend(v); }
+    else if (!isMe) { const a = document.createElement('audio'); a.autoplay = true; el.append(a); }
+    return el;
+  });
+  const m = t.querySelector('video, audio');
+  if (m && stream && m.srcObject !== stream) { m.srcObject = stream; m.play && m.play().catch(() => {}); }
+  t.classList.toggle('has-video', video && !!stream && stream.getVideoTracks().length > 0);
+  return t;
+}
+function renderConf(c) {
+  if (!c || c !== conf) return;
+  const d = c.data || {};
+  const names = d.names || {};
+  const isVideo = c.type === 'video';
+  const order = [];
+  // me
+  const meT = mediaTile('me', me.name, isVideo ? c.local : null, { me: true, video: isVideo });
+  meT.querySelector('.nm').textContent = 'You' + (c.isHost ? ' (host)' : '');
+  meT.querySelector('.st').textContent = cfMuted ? 'Muted' : '';
+  order.push(meT);
+  // connected / connecting participants
+  for (const uid of (d.joined || [])) {
+    if (uid === me.uid) continue;
+    const p = c.peers.get(uid);
+    const t = mediaTile('u:' + uid, names[uid] || 'Employee', p ? p.stream : null, { video: isVideo });
+    t.querySelector('.nm').textContent = (names[uid] || 'Employee') + (uid === d.host ? ' (host)' : '');
+    t.querySelector('.st').textContent = !p ? 'Joining…' : p.state === 'connected' ? '' : p.state === 'failed' ? 'Connection problem' : p.state === 'reconnecting' ? 'Reconnecting…' : 'Connecting…';
+    t.classList.remove('waiting');
+    order.push(t);
+  }
+  // invited, still ringing
+  for (const uid of (d.invited || [])) {
+    const t = tileFor('i:' + uid, () => { const el = document.createElement('div'); el.className = 'tile waiting'; el.innerHTML = `<div class="avatar">${esc(initials(names[uid] || '?'))}</div><div class="nm">${esc(names[uid] || 'Employee')}</div><div class="st">Ringing…</div>`; return el; });
+    order.push(t);
+  }
+  // outside phone numbers (host's SIP legs, or listed in the conference doc for others)
+  const ext = c.isHost ? [...c.legs.entries()].map(([id, l]) => ({ id, number: l.number, status: l.status })) : (d.ext || []).map((x, i) => ({ id: 'e' + i, ...x }));
+  for (const x of ext) {
+    const t = tileFor('x:' + x.id, () => {
+      const el = document.createElement('div'); el.className = 'tile ext';
+      el.innerHTML = `<div class="avatar">☎</div><div class="nm"></div><div class="st"></div>${c.isHost ? `<button class="x" data-leg="${x.id}" aria-label="Hang up">✕</button>` : ''}`;
+      return el;
+    });
+    t.querySelector('.nm').textContent = x.number;
+    t.querySelector('.st').textContent = x.status === 'connected' ? 'Phone · connected' : x.status === 'ringing' ? 'Ringing…' : 'Calling…';
+    order.push(t);
+  }
+  // drop tiles no longer present
+  const keep = new Set(order);
+  for (const [k, el] of tiles) if (!keep.has(el)) { el.querySelectorAll('video,audio').forEach((m) => { m.srcObject = null; }); el.remove(); tiles.delete(k); }
+  const grid = $('conf-grid');
+  order.forEach((el, i) => { if (grid.children[i] !== el) grid.insertBefore(el, grid.children[i] || null); });
+  grid.className = `conf-grid ${isVideo ? 'video' : 'voice'} n${order.length}`;
+  const inCall = 1 + (d.joined || []).filter((u) => u !== me.uid).length + ext.filter((x) => x.status === 'connected').length;
+  $('conf-title').textContent = `Group ${isVideo ? 'video' : 'voice'} call · ${inCall} in call`;
+  $('cf-end').querySelector('span').textContent = c.isHost ? 'End' : 'Leave';
+}
+$('conf-grid').addEventListener('click', (e) => { const b = e.target.closest('[data-leg]'); if (b && conf) conf.hangupLeg(b.dataset.leg); });
+
+function endConfUi(why) {
+  const c = conf;
+  conf = null;
+  clearInterval(confTimer);
+  for (const [, el] of tiles) el.querySelectorAll('video,audio').forEach((m) => { m.srcObject = null; });
+  tiles.clear(); $('conf-grid').innerHTML = '';
+  closePicker();
+  if (native) Native.endCall({ keepService: pref('ringClosed', true) }).catch(() => {});
+  if (c && c.startedAt && me) {
+    const names = Object.entries((c.data && c.data.names) || {}).filter(([u]) => u !== me.uid).map(([, n]) => n);
+    writeLog(me.uid, 'conf-' + c.id, { peerUid: 'conf:' + c.id, peerName: 'Group: ' + (names.slice(0, 3).join(', ') || 'call') + (names.length > 3 ? ` +${names.length - 3}` : ''),
+      dir: c.isHost ? 'out' : 'in', type: 'conf', media: c.type, status: 'answered', duration: Math.round(((c.endedAt || Date.now()) - c.startedAt) / 1000), createdAtMs: c.startedAt });
+  }
+  if (why) toast(why);
+  if (me) show(homeScreen());
+}
+
+$('cf-mute').addEventListener('click', () => { if (!conf) return; cfMuted = !cfMuted; conf.setMuted(cfMuted); $('cf-mute').classList.toggle('active', cfMuted); renderConf(conf); });
+$('cf-speaker').addEventListener('click', () => { cfSpeaker = !cfSpeaker; $('cf-speaker').classList.toggle('active', cfSpeaker); if (native) Native.setSpeaker({ on: cfSpeaker }).catch(() => {}); });
+$('cf-cam').addEventListener('click', () => { if (!conf) return; cfCam = !cfCam; conf.setCamera(cfCam); $('cf-cam').classList.toggle('active', !cfCam); });
+$('cf-add').addEventListener('click', () => { if (conf) openPicker('add'); });
+$('cf-end').addEventListener('click', async () => {
+  if (!conf) return;
+  const c = conf;
+  if (c.isHost && ((c.data.joined || []).length > 2 || c.legs.size)) {
+    if (!confirm('End the group call for everyone?')) return;
+  }
+  await c.leave(c.isHost);
+});
+
+// Incoming group-call invites
+function watchConfInvites() {
+  unsubs.push(onSnapshot(query(collection(db, 'confs'), where('invited', 'array-contains', me.uid)), (snap) => {
+    snap.docChanges().forEach((ch) => {
+      const d = ch.doc.data(); const id = ch.doc.id;
+      if (ch.type === 'added' && d.status === 'active' && Date.now() - (d.createdAtMs || 0) < 3 * 3600000) {
+        if (pendingConf === id) { pendingConf = null; joinConf(id); return; }
+        if (current || conf || incoming || sipIncoming || (confIncoming && confIncoming.id !== id)) return;
+        showConfIncoming(id, d);
+      }
+      if (ch.type === 'removed' && confIncoming && confIncoming.id === id && !confIncoming.accepting) {
+        confIncoming = null; Tone.stop();
+        if (native) Native.cancelIncoming().catch(() => {});
+        toast(`Missed group call from ${d.hostName || 'a colleague'}`);
+        show(homeScreen());
+      }
+    });
+  }, (e) => console.warn('conf invites', e)));
+}
+function showConfIncoming(id, d) {
+  confIncoming = { id, data: d };
+  const n = (d.joined || []).length + (d.invited || []).length;
+  $('in-name').textContent = d.hostName || 'Group call';
+  $('in-avatar').innerHTML = '<svg style="width:46px;height:46px"><use href="#i-group"/></svg>';
+  $('in-type').textContent = `Group ${d.type === 'video' ? 'video' : 'voice'} call · ${n} people`;
+  show('s-incoming');
+  (native ? Native.ringIncoming({ callId: 'conf:' + id, fromName: `${d.hostName || 'FitX'} (group)`, callType: d.type }).then((r) => r.shown) : Promise.resolve(false))
+    .catch(() => false).then((shown) => { if (!shown && confIncoming && confIncoming.id === id) Tone.ring(); });
+}
+function acceptConf() {
+  if (!confIncoming) return;
+  const id = confIncoming.id; confIncoming.accepting = true; confIncoming = null;
+  Tone.stop(); if (native) Native.cancelIncoming().catch(() => {});
+  joinConf(id);
+}
+function declineConf() {
+  if (!confIncoming) return;
+  const id = confIncoming.id; confIncoming = null;
+  Tone.stop(); if (native) Native.cancelIncoming().catch(() => {});
+  updateDoc(doc(db, 'confs', id), { invited: arrayRemove(me.uid) }).catch(() => {});
+  show(homeScreen());
+}
+
 // ---------- Incoming ----------
 function watchIncoming() {
   const q = query(collection(db, 'calls'), where('to', '==', me.uid), where('status', '==', 'ringing'));
@@ -1003,7 +1266,7 @@ function watchIncoming() {
       if (ch.type === 'added') {
         const age = Date.now() - (ms(d.createdAt) || d.createdAtMs || 0);
         if (age > 60000) return; // stale
-        if (current || (incoming && incoming.id !== id)) {
+        if (current || conf || confIncoming || (incoming && incoming.id !== id)) {
           updateDoc(ch.doc.ref, { status: 'busy', endedAt: serverTimestamp() }).catch(() => {});
           return;
         }
@@ -1065,8 +1328,8 @@ async function declineIncoming() {
   show(homeScreen());
   await updateDoc(ref, { status: 'declined', endedAt: serverTimestamp(), endedBy: me.uid }).catch(() => {});
 }
-$('in-accept').addEventListener('click', () => (sipIncoming ? acceptSip() : acceptIncoming()));
-$('in-decline').addEventListener('click', () => (sipIncoming ? declineSip() : declineIncoming()));
+$('in-accept').addEventListener('click', () => (confIncoming ? acceptConf() : sipIncoming ? acceptSip() : acceptIncoming()));
+$('in-decline').addEventListener('click', () => (confIncoming ? declineConf() : sipIncoming ? declineSip() : declineIncoming()));
 
 // ---------- Notification taps: fitxcall://call?id=...&action=answer|decline|open ----------
 function handleLink(url) {
@@ -1074,6 +1337,11 @@ function handleLink(url) {
   const u = new URL(url.replace('fitxcall://', 'https://x/'));
   const id = u.searchParams.get('id'); const action = u.searchParams.get('action') || 'open';
   if (!id) return;
+  if (id.startsWith('conf:')) {
+    if (confIncoming && 'conf:' + confIncoming.id === id) { if (action === 'answer') acceptConf(); else if (action === 'decline') declineConf(); }
+    else if (action === 'answer') pendingConf = id.slice(5);
+    return;
+  }
   if (sipIncoming && sipIncoming.id === id) {
     if (action === 'answer') acceptSip(); else if (action === 'decline') declineSip();
     return;
@@ -1087,7 +1355,7 @@ if (native) {
   App.addListener('appUrlOpen', (e) => handleLink(e.url));
   App.getLaunchUrl().then((r) => r && handleLink(r.url)).catch(() => {});
   App.addListener('backButton', () => {
-    if (current || incoming || sipIncoming) return; // never leave a call by accident
+    if (current || incoming || sipIncoming || conf || confIncoming) { if (!$('picker').classList.contains('hidden')) closePicker(); return; } // never leave a call by accident
     if (!$('dtmf').classList.contains('hidden')) { $('dtmf').classList.add('hidden'); return; }
     if (chat.viewerOpen()) return chat.closeViewer();
     if (chat.isOpen()) return chat.close();
@@ -1099,7 +1367,7 @@ if (native) {
     inBackground = !isActive;
     if (isActive) {
       ping(); refreshChecks(); chat.resume();
-      if ((incoming || sipIncoming) && !current) { Native.cancelIncoming().catch(() => {}); if (!Tone.timer) Tone.ring(); }
+      if ((incoming || sipIncoming || confIncoming) && !current && !conf) { Native.cancelIncoming().catch(() => {}); if (!Tone.timer) Tone.ring(); }
     }
   });
 }

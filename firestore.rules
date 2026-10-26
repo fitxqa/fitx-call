@@ -79,6 +79,22 @@ service cloud.firestore {
       }
     }
 
+    // Group calls: only people invited to the call (and the host) can see or join it.
+    function confOf(id) { return get(/databases/$(database)/documents/confs/$(id)).data; }
+    match /confs/{confId} {
+      allow create: if active() && request.resource.data.host == request.auth.uid
+        && request.auth.uid in request.resource.data.allowed;
+      allow read: if active() && (request.auth.uid in resource.data.allowed || request.auth.uid in resource.data.invited);
+      allow update: if active() && request.auth.uid in resource.data.allowed
+        && request.resource.data.host == resource.data.host;
+      match /pairs/{pairId} {
+        allow read, create, update: if active() && request.auth.uid in confOf(confId).allowed;
+        match /{side}/{candId} {
+          allow read, create: if active() && request.auth.uid in confOf(confId).allowed;
+        }
+      }
+    }
+
     // Photos / voice / video, split into ~900 KB parts (free plan has no file Storage).
     match /media/{mediaId} {
       allow read: if active() && inChat(resource.data.chatId);

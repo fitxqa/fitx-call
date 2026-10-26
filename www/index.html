@@ -41,6 +41,8 @@
     <symbol id="i-dialpad" viewBox="0 0 24 24"><path d="M12 19a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM6 1a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm0 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm0 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm12-8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm-6 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm0-6a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm-6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm0-6a2 2 0 1 0 0 4 2 2 0 0 0 0-4z" fill="currentColor"/></symbol>
     <symbol id="i-sim" viewBox="0 0 24 24"><path d="M18 2h-8L4 8v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zM9 19H7v-2h2zm8 0h-2v-2h2zm-4 0h-2v-4h2zm-4-4H7v-4h2zm4 0h-2v-2h2zm4 0h-2v-4h2z" fill="currentColor"/></symbol>
     <symbol id="i-backspace" viewBox="0 0 24 24"><path d="M22 3H7c-.7 0-1.2.3-1.6.9L0 12l5.4 8.1c.4.5.9.9 1.6.9h15a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-3 12.6L17.6 17 14 13.4 10.4 17 9 15.6 12.6 12 9 8.4 10.4 7 14 10.6 17.6 7 19 8.4 15.4 12z" fill="currentColor"/></symbol>
+    <symbol id="i-group" viewBox="0 0 24 24"><path d="M12 12.75c1.63 0 3.07.39 4.24.9A2.99 2.99 0 0 1 18 16.4V18H6v-1.59c0-1.18.68-2.26 1.76-2.73 1.17-.52 2.61-.93 4.24-.93zM4 13a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm1.13 1.1A6.98 6.98 0 0 0 4 14c-.99 0-1.93.21-2.78.58A2 2 0 0 0 0 16.43V18h4.5v-1.61c0-.83.23-1.61.63-2.29zM20 13a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm4 3.43c0-.81-.48-1.53-1.22-1.85A6.95 6.95 0 0 0 20 14c-.39 0-.76.04-1.13.1.4.68.63 1.46.63 2.29V18H24zM12 6a3 3 0 1 1 0 6 3 3 0 0 1 0-6z" fill="currentColor"/></symbol>
+    <symbol id="i-add" viewBox="0 0 24 24"><path d="M15 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2zm9 4c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" fill="currentColor"/></symbol>
     <symbol id="i-trash" viewBox="0 0 24 24"><path d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6zM19 4h-3.5l-1-1h-5l-1 1H5v2h14z" fill="currentColor"/></symbol>
   </svg>
 
@@ -87,7 +89,10 @@
     </header>
 
     <div id="tab-contacts" class="tab">
-      <input id="search" class="search" placeholder="Search employees" autocomplete="off">
+      <div class="team-top">
+        <input id="search" class="search" placeholder="Search employees" autocomplete="off">
+        <button class="btn primary group-btn" id="group-btn"><svg><use href="#i-group"/></svg>Group call</button>
+      </div>
       <ul id="contacts" class="list"></ul>
     </div>
 
@@ -287,6 +292,44 @@
   <div id="viewer" class="viewer hidden"><button id="viewer-close" class="icon-btn plain">✕</button><div id="viewer-body"></div></div>
 
   <!-- Incoming call -->
+  <!-- Conference -->
+  <section id="s-conf" class="screen call hidden">
+    <div class="conf-head">
+      <b id="conf-title">Group call</b>
+      <span id="conf-time">Connecting…</span>
+    </div>
+    <div class="conf-grid" id="conf-grid"></div>
+    <div class="call-actions">
+      <button class="round dark" id="cf-mute"><svg><use href="#i-mic"/></svg><span>Mute</span></button>
+      <button class="round dark" id="cf-speaker"><svg><use href="#i-speaker"/></svg><span>Speaker</span></button>
+      <button class="round dark cf-vid" id="cf-cam"><svg><use href="#i-video"/></svg><span>Camera</span></button>
+      <button class="round dark" id="cf-add"><svg><use href="#i-add"/></svg><span>Add</span></button>
+      <button class="round red" id="cf-end"><svg><use href="#i-end"/></svg><span>Leave</span></button>
+    </div>
+  </section>
+
+  <!-- People picker (start group call / add people / add phone number) -->
+  <div id="picker" class="sheet hidden">
+    <div class="sheet-box">
+      <div class="sheet-head"><b id="pk-title">Group call</b><button class="icon-btn plain" id="pk-close" aria-label="Close">✕</button></div>
+      <div class="seg pk-tabs" id="pk-tabs"><button data-pt="team" class="on">Team</button><button data-pt="phone">Phone number (SIP)</button></div>
+      <div id="pk-team">
+        <p class="muted" id="pk-hint"></p>
+        <ul class="list pk-list" id="pk-list"></ul>
+      </div>
+      <div id="pk-phone" class="hidden">
+        <p class="muted">Calls any mobile or landline through your SIP account and joins it to this group call.</p>
+        <input id="pk-number" type="tel" placeholder="Phone number, e.g. 55123456" autocomplete="off">
+        <button class="btn primary wide" id="pk-dial">Call &amp; add to group</button>
+      </div>
+      <div class="pk-actions" id="pk-actions">
+        <button class="btn primary" id="pk-voice"><svg><use href="#i-phone"/></svg> Voice</button>
+        <button class="btn primary" id="pk-video"><svg><use href="#i-video"/></svg> Video</button>
+        <button class="btn primary hidden" id="pk-invite">Add to call</button>
+      </div>
+    </div>
+  </div>
+
   <section id="s-incoming" class="screen call hidden">
     <div class="call-info">
       <div class="avatar xl" id="in-avatar"></div>

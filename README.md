@@ -38,6 +38,13 @@ compressed, videos ≤ 8 MB, voice ≤ 3 min, and media auto-deletes after 30 da
   3CX, Yeastar, Kamailio, Zadarma, Telnyx…). Incoming SIP calls ring while the app is open or in the background.
 - In a SIP call, **Keypad** sends DTMF tones (IVR menus). SIP and phone calls appear in Recents with redial.
 
+## Group calls
+
+- **Team → Group call**: pick people, then **Voice** (up to 6 people) or **Video** (up to 4). Everyone rings, even with the app closed.
+- During the call **Add** invites more colleagues, or (host, with a SIP account) dials **any outside phone number**
+  through SIP and mixes it in, so everyone hears the outside caller and they hear everyone.
+- A phone's own SIM call can't be merged — Android doesn't allow apps to access cellular call audio.
+
 ## How it works
 - **WebRTC** peer-to-peer, encrypted (DTLS-SRTP). Voice/video never pass through Firebase.
 - **Firestore** = call signaling, employee directory, per-user call history, protected by `firestore.rules`.

@@ -156,20 +156,23 @@ export class SipPhone {
   }
 
   /** Place an outgoing call. Returns a SipCall (hooks must be set right after). */
-  async call(number) {
+  async call(number, opts = {}) {
     if (!this.ua) throw new Error('SIP is not set up');
     if (this.state !== 'registered') throw new Error('SIP is not connected yet');
     const clean = String(number).replace(/[^\d+*#a-zA-Z@._-]/g, '');
     const dial = (this.cfg.prefix || '') + clean;
     const target = dial.includes('@') ? `sip:${dial}` : `sip:${dial}@${this.cfg.domain}`;
     await loadTurn();
-    const session = this.ua.call(target, {
-      mediaConstraints: { audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false },
+    const options = {
       pcConfig: iceConfig(),
       rtcOfferConstraints: { offerToReceiveAudio: true, offerToReceiveVideo: false },
-    });
+    };
+    // Conference legs send a mixed stream (everyone in the conference) instead of the raw microphone.
+    if (opts.mediaStream) options.mediaStream = opts.mediaStream;
+    else options.mediaConstraints = { audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false };
+    const session = this.ua.call(target, options);
     const c = new SipCall(this, session, 'caller', clean);
-    this.active = c;
+    if (!opts.leg) this.active = c;
     return c;
   }
 }
